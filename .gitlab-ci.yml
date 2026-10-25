@@ -1,15 +1,3 @@
-spec:
-  inputs:
-    build_all:
-      type: boolean
-      default: true
-      description: 'Build all targets (linux x86_64 + aarch64)'
-    create_release:
-      type: boolean
-      default: false
-      description: 'Create a versioned release'
----
-
 stages:
   - sync
   - release
@@ -29,6 +17,7 @@ variables:
 
 github-sync:
   stage: sync
+  tags: [linux-truenas]
   <<: *github-common
   timeout: 3h
   rules:
@@ -78,6 +67,7 @@ github-sync:
 
 github-dispatch:
   stage: sync
+  tags: [linux-truenas]
   <<: *github-common
   timeout: 3h
   rules:
@@ -86,16 +76,11 @@ github-dispatch:
     - apk add --no-cache bash curl jq git github-cli openssh-client
     - sh scripts/setup-ssh-key.sh GITHUB_SSH_PRIVATE_KEY github.com
   script:
-    - |
-      BUILD_ALL="$[[ inputs.build_all ]]"
-      CREATE_RELEASE="$[[ inputs.create_release ]]"
-      if [ "$CREATE_RELEASE" = "true" ]; then
-        BUILD_ALL="true"
-      fi
-      bash scripts/trigger-github-build.sh main "$BUILD_ALL" "$CREATE_RELEASE"
+    - bash scripts/trigger-github-build.sh main "${BUILD_ALL:-true}" "${CREATE_RELEASE:-false}"
 
 github-mr-build:
   stage: sync
+  tags: [linux-truenas]
   <<: *github-common
   timeout: 3h
   rules:
