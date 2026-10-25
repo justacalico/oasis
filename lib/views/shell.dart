@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/desktop_entry.dart';
 import '../services/app_launcher.dart';
 import '../services/platform_services.dart';
 import '../services/session_actions.dart';
@@ -24,11 +27,14 @@ class ShellServices {
     required this.sessionActions,
   });
 
-  /// Wires up the real platform services.
+  /// Wires up the real platform services. The entries scan is kicked off
+  /// here so the applications overlay opens instantly.
   factory ShellServices.platform() {
     final run = processRunner();
+    final entriesLoader = defaultEntriesLoader();
+    unawaited(entriesLoader.load().catchError((_) => const <DesktopEntry>[]));
     return ShellServices(
-      entriesLoader: defaultEntriesLoader(),
+      entriesLoader: entriesLoader,
       appLauncher: AppLauncher(run),
       batteryReader: defaultBatteryReader(),
       sessionActions: SessionActions(run),
