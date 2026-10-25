@@ -25,15 +25,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navAbout => 'О программе';
 
   @override
-  String get windowClose => 'Закрыть';
-
-  @override
-  String get windowMinimize => 'Свернуть';
-
-  @override
-  String get windowZoom => 'Масштаб';
-
-  @override
   String get searchApps => 'Поиск приложений';
 
   @override

@@ -9,7 +9,6 @@ import 'package:oasis/services/battery.dart';
 import 'package:oasis/services/platform_services.dart';
 import 'package:oasis/services/session_actions.dart';
 import 'package:oasis/services/version_checker.dart';
-import 'package:oasis/services/window_actions.dart';
 import 'package:oasis/state/app_state.dart';
 import 'package:oasis/utils/clock.dart' as oasis_clock;
 import 'package:oasis/views/shell.dart';
@@ -67,30 +66,6 @@ class FakeBatteryReader extends SysfsBatteryReader {
   Future<BatteryStatus?> read() async => status;
 }
 
-class FakeWindowActions extends WindowActions {
-  final List<String> calls = [];
-  bool maximized = false;
-
-
-  @override
-  Future<void> close() async => calls.add('close');
-
-  @override
-  Future<void> minimize() async => calls.add('minimize');
-
-  @override
-  Future<void> toggleMaximize() async {
-    calls.add('toggleMaximize');
-    maximized = !maximized;
-  }
-
-  @override
-  Future<void> startDragging() async => calls.add('startDragging');
-
-  @override
-  Future<bool> isMaximized() async => maximized;
-}
-
 class RecordingRunner {
   final List<String> calls = [];
   final List<int> exitCodes;
@@ -128,12 +103,10 @@ ShellServices fakeServices({
   BatteryStatus? battery,
   List<int>? exitCodes,
   RecordingRunner? runner,
-  FakeWindowActions? windowActions,
   DesktopEntriesLoader? loader,
 }) {
   final run = runner ?? RecordingRunner(exitCodes ?? const [0]);
   return ShellServices(
-    windowActions: windowActions ?? FakeWindowActions(),
     entriesLoader: loader ?? FakeEntriesLoader(entries ?? fixtureEntries),
     appLauncher: AppLauncher(run.call),
     batteryReader: FakeBatteryReader(battery),

@@ -134,24 +134,6 @@ abstract class AppLocalizations {
   /// **'About'**
   String get navAbout;
 
-  /// No description provided for @windowClose.
-  ///
-  /// In en, this message translates to:
-  /// **'Close'**
-  String get windowClose;
-
-  /// No description provided for @windowMinimize.
-  ///
-  /// In en, this message translates to:
-  /// **'Minimise'**
-  String get windowMinimize;
-
-  /// No description provided for @windowZoom.
-  ///
-  /// In en, this message translates to:
-  /// **'Zoom'**
-  String get windowZoom;
-
   /// No description provided for @searchApps.
   ///
   /// In en, this message translates to:

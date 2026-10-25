@@ -25,15 +25,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get navAbout => '关于';
 
   @override
-  String get windowClose => '关闭';
-
-  @override
-  String get windowMinimize => '最小化';
-
-  @override
-  String get windowZoom => '缩放';
-
-  @override
   String get searchApps => '搜索应用程序';
 
   @override

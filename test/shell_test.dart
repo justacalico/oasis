@@ -5,7 +5,6 @@ import 'package:oasis/views/apps/apps_page.dart';
 import 'package:oasis/views/settings/settings_page.dart';
 import 'package:oasis/views/shell.dart';
 import 'package:oasis/views/sidebar.dart';
-import 'package:oasis/views/top_bar.dart';
 
 import 'helpers.dart';
 
@@ -14,9 +13,8 @@ void main() {
     await loadOasisFonts();
   });
 
-  testWidgets('wide shell shows sidebar, top bar and desktop', (tester) async {
+  testWidgets('wide shell shows sidebar and desktop', (tester) async {
     await pumpShell(tester);
-    expect(find.byType(TopBar), findsOneWidget);
     expect(find.byType(OasisSidebar), findsOneWidget);
     expect(find.text('Desktop'), findsOneWidget);
     expect(find.text('Applications'), findsOneWidget);
@@ -64,27 +62,8 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('top bar drag and double tap reach the window', (tester) async {
-    final actions = FakeWindowActions();
-    await pumpShell(tester, services: fakeServices(windowActions: actions));
-
-    final title = find.text('Oasis').first;
-    await tester.timedDrag(title, const Offset(30, 0), const Duration(milliseconds: 300));
-    await tester.pump();
-    expect(actions.calls, contains('startDragging'));
-
-    await tester.tap(title);
-    await tester.pump(const Duration(milliseconds: 60));
-    await tester.tap(title);
-    await tester.pump();
-    expect(actions.calls, contains('toggleMaximize'));
-    await tester.pump(const Duration(milliseconds: 400));
-  });
-
-  testWidgets('non-desktop shows no top bar but keeps the sidebar',
-      (tester) async {
+  testWidgets('non-desktop keeps the sidebar', (tester) async {
     await pumpShell(tester, platform: TargetPlatform.android);
-    expect(find.byType(TopBar), findsNothing);
     expect(find.byType(OasisSidebar), findsOneWidget);
   });
 
@@ -113,7 +92,6 @@ void main() {
     expect(services.appLauncher, isNotNull);
     expect(services.batteryReader, isNotNull);
     expect(services.sessionActions, isNotNull);
-    expect(services.windowActions, isNotNull);
   });
 
   testWidgets('app without a platform override', (tester) async {
