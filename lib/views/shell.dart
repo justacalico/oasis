@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/desktop_entry.dart';
 import '../services/app_launcher.dart';
+import '../services/compositor_service.dart';
 import '../services/platform_services.dart';
 import '../services/session_actions.dart';
 import '../state/app_state.dart';
@@ -19,12 +20,14 @@ class ShellServices {
   final AppLauncher appLauncher;
   final SysfsBatteryReader batteryReader;
   final SessionActions sessionActions;
+  final CompositorService windows;
 
   const ShellServices({
     required this.entriesLoader,
     required this.appLauncher,
     required this.batteryReader,
     required this.sessionActions,
+    required this.windows,
   });
 
   /// Wires up the real platform services. The entries scan is kicked off
@@ -33,11 +36,14 @@ class ShellServices {
     final run = processRunner();
     final entriesLoader = defaultEntriesLoader();
     unawaited(entriesLoader.load().catchError((_) => const <DesktopEntry>[]));
+    final windows = CompositorService();
+    unawaited(windows.init());
     return ShellServices(
       entriesLoader: entriesLoader,
       appLauncher: AppLauncher(run),
       batteryReader: defaultBatteryReader(),
       sessionActions: SessionActions(run),
+      windows: windows,
     );
   }
 }
@@ -65,6 +71,7 @@ class OasisShell extends StatelessWidget {
                 reader: services.batteryReader,
                 session: services.sessionActions,
                 launcher: services.appLauncher,
+                windows: services.windows,
               ),
             AppDestination.settings => const SettingsPage(),
             AppDestination.about => const AboutPage(),

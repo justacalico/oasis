@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:oasis/app.dart';
 import 'package:oasis/models/app_update.dart';
 import 'package:oasis/models/desktop_entry.dart';
+import 'package:oasis/models/compositor_window.dart';
 import 'package:oasis/services/app_launcher.dart';
+import 'package:oasis/services/compositor_service.dart';
 import 'package:oasis/services/battery.dart';
 import 'package:oasis/services/platform_services.dart';
 import 'package:oasis/services/session_actions.dart';
@@ -104,12 +106,44 @@ class FakeVersionChecker extends VersionChecker {
   }
 }
 
+class FakeCompositorService extends CompositorService {
+  List<CompositorWindow> result;
+  final List<String> calls = [];
+
+  FakeCompositorService([this.result = const []]);
+
+  @override
+  List<CompositorWindow> get windows => result;
+
+  @override
+  bool get available => true;
+
+  @override
+  Future<void> focus(int id) async {
+    calls.add('focus:$id');
+    result = [
+      for (final w in result)
+        CompositorWindow(
+            id: w.id, title: w.title, appId: w.appId, focused: w.id == id),
+    ];
+    notifyListeners();
+  }
+
+  @override
+  Future<void> close(int id) async {
+    calls.add('close:$id');
+    result = [for (final w in result) if (w.id != id) w];
+    notifyListeners();
+  }
+}
+
 ShellServices fakeServices({
   List<DesktopEntry>? entries,
   BatteryStatus? battery,
   List<int>? exitCodes,
   RecordingRunner? runner,
   DesktopEntriesLoader? loader,
+  CompositorService? windows,
 }) {
   final run = runner ?? RecordingRunner(exitCodes ?? const [0]);
   return ShellServices(
@@ -117,6 +151,7 @@ ShellServices fakeServices({
     appLauncher: AppLauncher(run.call),
     batteryReader: FakeBatteryReader(battery),
     sessionActions: SessionActions(run.call),
+    windows: windows ?? FakeCompositorService(),
   );
 }
 
