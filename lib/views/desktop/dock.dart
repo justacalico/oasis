@@ -46,12 +46,13 @@ class OasisDock extends StatelessWidget {
                   onTap: () => onLaunch(entry),
                   child: AppGlyph(entry: entry, size: 48),
                 ),
-              Container(
-                width: 1,
-                height: 40,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                color: scheme.outlineVariant,
-              ),
+              if (entries.isNotEmpty)
+                Container(
+                  width: 1,
+                  height: 40,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  color: scheme.outlineVariant,
+                ),
               _DockIcon(
                 key: const Key('dock_apps_button'),
                 tooltip: l.navApps,

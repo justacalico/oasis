@@ -52,7 +52,6 @@ class OasisShell extends StatelessWidget {
         AppDestination.desktop => DesktopPage(
             reader: services.batteryReader,
             session: services.sessionActions,
-            loader: services.entriesLoader,
             launcher: services.appLauncher,
           ),
         AppDestination.apps => AppsPage(
