@@ -13,16 +13,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'Oasis';
 
   @override
-  String get navDesktop => '桌面';
-
-  @override
   String get navApps => '应用程序';
-
-  @override
-  String get navSettings => '设置';
-
-  @override
-  String get navAbout => '关于';
 
   @override
   String get searchApps => '搜索应用程序';

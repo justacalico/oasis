@@ -1,10 +1,7 @@
 {
   "@@locale": "ru",
   "appTitle": "Oasis",
-  "navDesktop": "Рабочий стол",
   "navApps": "Приложения",
-  "navSettings": "Настройки",
-  "navAbout": "О программе",
   "searchApps": "Поиск приложений",
   "noApps": "Приложения не найдены",
   "theme": "Тема",

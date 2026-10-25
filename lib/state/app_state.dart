@@ -8,6 +8,8 @@ import '../services/version_checker.dart';
 
 enum Wallpaper { dunes, lagoon, midnight }
 
+enum AppDestination { desktop, apps, settings, about }
+
 /// Shared application state: theme, locale, navigation and the update check.
 class OasisState extends ChangeNotifier {
   final SharedPreferences _prefs;

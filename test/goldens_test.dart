@@ -64,20 +64,6 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('narrow layout with drawer', (tester) async {
-    await pumpShell(tester, surface: const Size(500, 800));
-    await tester.tap(find.byKey(const Key('drawer_button')));
-    await tester.pump();
-    await pumpUntil(
-      tester,
-      () =>
-          tester.any(find.text('About')) &&
-          tester.getCenter(find.text('About')).dx > 0,
-    );
-    await snap(tester, 'narrow_drawer');
-    await tester.pumpWidget(const SizedBox());
-  });
-
   testWidgets('zh settings golden', (tester) async {
     final state = await pumpShell(
       tester,

@@ -110,29 +110,11 @@ abstract class AppLocalizations {
   /// **'Oasis'**
   String get appTitle;
 
-  /// No description provided for @navDesktop.
-  ///
-  /// In en, this message translates to:
-  /// **'Desktop'**
-  String get navDesktop;
-
   /// No description provided for @navApps.
   ///
   /// In en, this message translates to:
   /// **'Applications'**
   String get navApps;
-
-  /// No description provided for @navSettings.
-  ///
-  /// In en, this message translates to:
-  /// **'Settings'**
-  String get navSettings;
-
-  /// No description provided for @navAbout.
-  ///
-  /// In en, this message translates to:
-  /// **'About'**
-  String get navAbout;
 
   /// No description provided for @searchApps.
   ///

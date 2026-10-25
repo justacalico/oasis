@@ -9,7 +9,6 @@ import '../../services/battery.dart';
 import '../../services/session_actions.dart';
 import '../../state/app_state.dart';
 import '../../widgets/wallpaper.dart';
-import '../sidebar.dart';
 import 'dock.dart';
 import 'quick_settings.dart';
 import 'top_panel.dart';
