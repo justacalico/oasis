@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../models/desktop_entry.dart';
 import '../../services/app_launcher.dart';
 import '../../services/platform_services.dart';
 import '../../services/battery.dart';
@@ -19,14 +18,12 @@ import 'top_panel.dart';
 class DesktopPage extends StatefulWidget {
   final SysfsBatteryReader reader;
   final SessionActions session;
-  final DesktopEntriesLoader loader;
   final AppLauncher launcher;
 
   const DesktopPage({
     super.key,
     required this.reader,
     required this.session,
-    required this.loader,
     required this.launcher,
   });
 
@@ -36,16 +33,12 @@ class DesktopPage extends StatefulWidget {
 
 class _DesktopPageState extends State<DesktopPage> {
   BatteryStatus? _battery;
-  List<DesktopEntry> _entries = const [];
 
   @override
   void initState() {
     super.initState();
     widget.reader.read().then((status) {
       if (mounted) setState(() => _battery = status);
-    });
-    widget.loader.load().then((entries) {
-      if (mounted) setState(() => _entries = entries);
     });
   }
 
@@ -82,7 +75,7 @@ class _DesktopPageState extends State<DesktopPage> {
         Align(
           alignment: Alignment.bottomCenter,
           child: OasisDock(
-            entries: _entries,
+            entries: const [],
             onLaunch: (entry) =>
                 launchEntry(context, widget.launcher, entry),
             onShowApps: () => context

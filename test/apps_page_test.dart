@@ -72,10 +72,10 @@ void main() {
     state.setDestinationIndex(1);
     await tester.pump();
     await tester.pump();
-    expect(loader.calls, 2);
+    expect(loader.calls, 1);
     await tester.tap(find.byKey(const Key('apps_refresh')));
     await tester.pump();
-    expect(loader.calls, 3);
+    expect(loader.calls, 2);
     expect(find.text('Terminal'), findsOneWidget);
   });
 }

@@ -1,6 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:oasis/l10n/app_localizations.dart';
+import 'package:oasis/models/desktop_entry.dart';
+import 'package:oasis/views/desktop/dock.dart';
 
 import 'helpers.dart';
 
@@ -9,18 +12,41 @@ void main() {
     await loadOasisFonts();
   });
 
-  testWidgets('dock lists applications and launches them', (tester) async {
-    final runner = RecordingRunner();
-    await pumpShell(tester, services: fakeServices(runner: runner));
-    await tester.pump();
+  testWidgets('dock renders the entries it is given', (tester) async {
+    final launched = <DesktopEntry>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: Center(
+            child: OasisDock(
+              entries: fixtureEntries,
+              onLaunch: launched.add,
+              onShowApps: () {},
+            ),
+          ),
+        ),
+      ),
+    );
 
     expect(find.byKey(const Key('dock_org.test.terminal')), findsOneWidget);
     expect(find.byKey(const Key('dock_org.test.files')), findsOneWidget);
     expect(find.byKey(const Key('dock_org.test.browser')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('dock_org.test.terminal')));
+    expect(launched.single.id, 'org.test.terminal');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('shell dock starts empty', (tester) async {
+    await pumpShell(tester);
     await tester.pump();
-    expect(runner.calls, ['gtk-launch org.test.terminal']);
+
+    expect(find.byKey(const Key('dock_apps_button')), findsOneWidget);
+    expect(find.byKey(const Key('dock_org.test.terminal')), findsNothing);
+    expect(find.byKey(const Key('dock_org.test.files')), findsNothing);
+    expect(find.byKey(const Key('dock_org.test.browser')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -28,7 +54,7 @@ void main() {
     await pumpShell(tester);
     await tester.pump();
 
-    final icon = find.byKey(const Key('dock_org.test.files'));
+    final icon = find.byKey(const Key('dock_apps_button'));
     final scale = find.descendant(
       of: icon,
       matching: find.byType(AnimatedScale),
@@ -49,7 +75,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('dock shows the app name in a tooltip', (tester) async {
+  testWidgets('dock shows a tooltip on hover', (tester) async {
     await pumpShell(tester);
     await tester.pump();
 
@@ -58,10 +84,10 @@ void main() {
     addTearDown(mouse.removePointer);
 
     await mouse.moveTo(
-      tester.getCenter(find.byKey(const Key('dock_org.test.browser'))),
+      tester.getCenter(find.byKey(const Key('dock_apps_button'))),
     );
     await tester.pump(const Duration(seconds: 1));
-    expect(find.text('Web Browser'), findsOneWidget);
+    expect(find.text('Applications'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -73,19 +99,6 @@ void main() {
     await tester.pump();
     expect(state.destinationIndex, 1);
     expect(find.byKey(const Key('app_search')), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('failed dock launch shows a snackbar', (tester) async {
-    await pumpShell(
-      tester,
-      services: fakeServices(exitCodes: const [1, 1]),
-    );
-    await tester.pump();
-
-    await tester.tap(find.byKey(const Key('dock_org.test.terminal')));
-    await tester.pump();
-    expect(find.text('Could not launch Terminal'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }
