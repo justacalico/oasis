@@ -87,6 +87,25 @@ void main() {
     state.setLauncherQuery('term');
   });
 
+  test('launcher opens, closes and clears the query', () async {
+    final (state, _) = await makeState();
+    expect(state.launcherOpen, isFalse);
+    var notified = 0;
+    state.addListener(() => notified++);
+
+    state.openLauncher();
+    expect(state.launcherOpen, isTrue);
+    expect(notified, 1);
+    state.openLauncher();
+    expect(notified, 1);
+
+    state.setLauncherQuery('term');
+    state.closeLauncher();
+    expect(state.launcherOpen, isFalse);
+    expect(state.launcherQuery, '');
+    state.closeLauncher();
+  });
+
   group('update check', () {
     test('caches the result and notifies', () async {
       SharedPreferences.setMockInitialValues({});

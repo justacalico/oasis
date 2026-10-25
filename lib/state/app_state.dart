@@ -8,7 +8,7 @@ import '../services/version_checker.dart';
 
 enum Wallpaper { dunes, lagoon, midnight }
 
-enum AppDestination { desktop, apps, settings, about }
+enum AppDestination { desktop, settings, about }
 
 /// Shared application state: theme, locale, navigation and the update check.
 class OasisState extends ChangeNotifier {
@@ -85,8 +85,24 @@ class OasisState extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _launcherOpen = false;
+  bool get launcherOpen => _launcherOpen;
+
   String _launcherQuery = '';
   String get launcherQuery => _launcherQuery;
+
+  void openLauncher() {
+    if (_launcherOpen) return;
+    _launcherOpen = true;
+    notifyListeners();
+  }
+
+  void closeLauncher() {
+    if (!_launcherOpen) return;
+    _launcherOpen = false;
+    _launcherQuery = '';
+    notifyListeners();
+  }
 
   void setLauncherQuery(String query) {
     if (query == _launcherQuery) return;

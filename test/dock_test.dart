@@ -91,13 +91,14 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('dock apps button opens the applications page', (tester) async {
+  testWidgets('dock apps button opens the applications overlay',
+      (tester) async {
     final state = await pumpShell(tester);
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('dock_apps_button')));
     await tester.pump();
-    expect(state.destinationIndex, 1);
+    expect(state.launcherOpen, isTrue);
     expect(find.byKey(const Key('app_search')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });

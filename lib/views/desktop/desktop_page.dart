@@ -78,9 +78,8 @@ class _DesktopPageState extends State<DesktopPage> {
             entries: const [],
             onLaunch: (entry) =>
                 launchEntry(context, widget.launcher, entry),
-            onShowApps: () => context
-                .read<OasisState>()
-                .setDestinationIndex(AppDestination.apps.index),
+            onShowApps: () =>
+                context.read<OasisState>().openLauncher(),
           ),
         ),
       ],

@@ -18,7 +18,7 @@ void main() {
     FakeVersionChecker? checker,
   }) async {
     final state = await pumpShell(tester, versionChecker: checker);
-    state.setDestinationIndex(3);
+    state.setDestinationIndex(2);
     await tester.pump();
     await tester.pump();
     return state;
@@ -126,7 +126,7 @@ void main() {
       buildSignature: 'test',
     );
     final state = await pumpShell(tester);
-    state.setDestinationIndex(3);
+    state.setDestinationIndex(2);
     await tester.pump();
     await tester.pump();
     await tester.tap(find.text('All releases'));

@@ -36,22 +36,22 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('applications', (tester) async {
+  testWidgets('applications overlay', (tester) async {
     final state = await pumpShell(tester);
-    state.setDestinationIndex(1);
-    await tester.pump();
+    state.openLauncher();
+    await tester.pumpAndSettle();
     await snap(tester, 'apps');
   });
 
   testWidgets('settings', (tester) async {
     final state = await pumpShell(tester);
-    state.setDestinationIndex(2);
+    state.setDestinationIndex(1);
     await snap(tester, 'settings');
   });
 
   testWidgets('about', (tester) async {
     final state = await pumpShell(tester);
-    state.setDestinationIndex(3);
+    state.setDestinationIndex(2);
     await tester.pump();
     await snap(tester, 'about');
   });
@@ -70,20 +70,20 @@ void main() {
       locale: const Locale.fromSubtags(
           languageCode: 'zh', scriptCode: 'Hans'),
     );
-    state.setDestinationIndex(2);
+    state.setDestinationIndex(1);
     await snap(tester, 'settings_zh');
   });
 
   testWidgets('ru apps golden', (tester) async {
     final state = await pumpShell(tester, locale: const Locale('ru'));
-    state.setDestinationIndex(1);
-    await tester.pump();
+    state.openLauncher();
+    await tester.pumpAndSettle();
     await snap(tester, 'apps_ru');
   });
 
   testWidgets('ga about golden', (tester) async {
     final state = await pumpShell(tester, locale: const Locale('ga'));
-    state.setDestinationIndex(3);
+    state.setDestinationIndex(2);
     await tester.pump();
     await snap(tester, 'about_ga');
   });
