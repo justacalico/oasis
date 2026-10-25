@@ -3,6 +3,7 @@
 #include <wayland-server-core.h>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,7 @@ class Backend {
     std::function<void(uint32_t, uint32_t, uint32_t, uint32_t)> modifiers;
     std::function<void(const std::string&)> keymap;
     std::function<void(Output*, int32_t, int32_t)> output_resized;
+    std::function<void()> quit;
   };
 
   virtual ~Backend() = default;
@@ -51,7 +53,7 @@ class Backend {
   virtual void set_cursor_visible(bool visible) {}
 };
 
-Backend* create_wayland_backend();
-Backend* create_drm_backend();
+std::unique_ptr<Backend> create_wayland_backend();
+std::unique_ptr<Backend> create_drm_backend();
 
 }  // namespace oasis

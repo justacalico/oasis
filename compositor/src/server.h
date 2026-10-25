@@ -2,20 +2,21 @@
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 #include <atomic>
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
 #include "backend.h"
+#include "flutter.h"
+#include "protocols.h"
+#include "renderer.h"
+#include "seat.h"
+#include "surface.h"
 #include "util.h"
+#include "wl.h"
+#include "xdg.h"
 
 namespace oasis {
-
-class Renderer;
-class Seat;
-class FlutterHost;
-class Surface;
-class XdgToplevel;
-class XdgPopup;
 
 struct Config {
   std::string bundle_dir;
@@ -26,12 +27,24 @@ struct Config {
 
 class Server {
  public:
+  ~Server();
+
   wl_display* display = nullptr;
   wl_event_loop* loop = nullptr;
-  Backend* backend = nullptr;
-  Renderer* renderer = nullptr;
-  Seat* seat = nullptr;
-  FlutterHost* flutter = nullptr;
+  std::unique_ptr<Backend> backend;
+  std::unique_ptr<Renderer> renderer;
+  std::unique_ptr<Seat> seat;
+  std::unique_ptr<FlutterHost> flutter;
+
+  std::unique_ptr<Compositor> compositor;
+  std::unique_ptr<Subcompositor> subcompositor;
+  std::unique_ptr<Shm> shm;
+  std::unique_ptr<XdgShell> shell;
+  std::unique_ptr<DataDeviceManager> data_manager;
+  std::unique_ptr<DecorationManager> decorations;
+  std::unique_ptr<Viewporter> viewporter;
+  std::unique_ptr<Dmabuf> dmabuf;
+  std::vector<std::unique_ptr<OutputGlobal>> output_globals;
 
   std::vector<Surface*> surfaces;
   std::vector<XdgToplevel*> toplevels;  // stacking order, bottom to top
@@ -47,15 +60,6 @@ class Server {
   std::atomic<bool> dirty{true};
   bool renderer_ready_ = false;
   bool running = true;
-  wl_event_source* windows_idle = nullptr;
-
-  // clipboard / dnd state (data_device.cc)
-  std::vector<wl_resource*> data_devices;
-  void* selection_source = nullptr;
-  wl_client* selection_client = nullptr;
-  bool dragging = false;
-  void* drag_source = nullptr;
-  Surface* drag_target_surface = nullptr;
 
   bool init(const Config& cfg);
   void run();
@@ -68,22 +72,22 @@ class Server {
   Backend::Output* primary_output();
   Surface* surface_at(double x, double y, Surface** out_surface,
                       double* sx, double* sy);
-  bool surface_contains(Surface* s, double x, double y, double* sx,
-                        double* sy);
   void raise(XdgToplevel* t);
   void add_toplevel(XdgToplevel* t);
   void remove_toplevel(XdgToplevel* t);
+  void add_popup(XdgPopup* p) { popups.push_back(p); }
+  void remove_popup(XdgPopup* p);
   void render(Backend::Output* o);
   void draw_surface_tree(Renderer* r, Surface* s, int32_t ox, int32_t oy);
-  void notify_selection();
-  void dnd_motion(double x, double y, uint32_t t);
-  void dnd_drop(uint32_t t);
-};
 
-void output_send_mode_changed(Backend::Output* out);
-void xdg_surface_committed(Surface* s);
-void surface_layout_pos(Surface* s, int32_t* lx, int32_t* ly);
-void server_popup_add(Server* server, XdgPopup* pop);
-void server_popup_remove(Server* server, XdgPopup* pop);
+ private:
+  void build_cursor();
+  void send_mode(Backend::Output* out);
+
+  uint32_t next_toplevel_id_ = 0;
+  std::array<uint32_t, 32 * 32> cursor_pixels_{};
+  std::unique_ptr<EventSource> windows_idle_;
+  Listener client_created_;
+};
 
 }  // namespace oasis

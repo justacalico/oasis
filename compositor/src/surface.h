@@ -5,12 +5,14 @@
 #include <memory>
 #include <vector>
 #include "util.h"
+#include "wl.h"
 
 namespace oasis {
 
 class Server;
 class Renderer;
 class XdgSurface;
+class Subsurface;
 
 // A GPU-importable client buffer (wl_buffer) — shm or dmabuf backed.
 class Buffer {
@@ -21,15 +23,21 @@ class Buffer {
   int32_t width = 0, height = 0;
   wl_resource* res = nullptr;  // wl_buffer
   bool taken = false;          // owned by a surface, outlives wl_buffer
+
+  static Buffer* from(wl_resource* res) { return user_data<Buffer>(res); }
+  // Shared wl_buffer resource destructor: frees the Buffer unless a surface
+  // took ownership of it.
+  static void resource_destroyed(wl_resource* res);
 };
 
-class Surface {
+extern const struct wl_buffer_interface buffer_impl;
+
+class Surface : public ResourceBound {
  public:
-  Surface(Server* server, wl_resource* res);
+  explicit Surface(Server* server);
   ~Surface();
 
   Server* server;
-  wl_resource* res;
 
   // committed state
   std::unique_ptr<Buffer> buffer;
@@ -46,7 +54,7 @@ class Surface {
   int32_t vp_dst_w = -1, vp_dst_h = -1;
 
   // subsurface state
-  wl_resource* subsurface_res = nullptr;
+  Subsurface* subsurface = nullptr;
   Surface* parent = nullptr;
   std::vector<Surface*> children;  // stacking order, bottom to top
   int32_t sub_x = 0, sub_y = 0;
@@ -71,8 +79,6 @@ class Surface {
 
   // role
   XdgSurface* xdg = nullptr;
-  bool is_popup = false;
-  bool is_drag_icon = false;
 
   bool mapped() const { return buffer != nullptr; }
   int32_t width() const;
@@ -82,6 +88,78 @@ class Surface {
   void send_frame_done(uint32_t ms);
   bool hit(double x, double y, double* sx, double* sy);
   void destroy_buffer();
+  void take_buffer(wl_resource* res);
+  void layout_pos(int32_t* lx, int32_t* ly);
+
+  // wl_surface requests
+  void attach(wl_resource* res, wl_resource* buffer_res, int32_t dx,
+              int32_t dy);
+  void damage(wl_resource*, int32_t, int32_t, int32_t, int32_t) {}
+  void frame(wl_resource* res, uint32_t cb_id);
+  void set_opaque_region(wl_resource*, wl_resource*) {}
+  void set_input_region(wl_resource* res, wl_resource* region_res);
+  void commit_request(wl_resource*) { commit(); }
+  void set_buffer_transform(wl_resource* res, int32_t transform);
+  void set_buffer_scale(wl_resource* res, int32_t scale);
+  void damage_buffer(wl_resource*, int32_t, int32_t, int32_t, int32_t) {}
+  void offset(wl_resource*, int32_t dx, int32_t dy);
+};
+
+// wl_region
+class WlRegion : public ResourceBound {
+ public:
+  Region region;
+  void add(wl_resource*, int32_t x, int32_t y, int32_t w, int32_t h) {
+    region.add({x, y, w, h});
+  }
+  void subtract(wl_resource*, int32_t x, int32_t y, int32_t w, int32_t h) {
+    region.subtract({x, y, w, h});
+  }
+};
+
+// wl_subsurface: the role object linking a surface below a parent.
+class Subsurface : public ResourceBound {
+ public:
+  Subsurface(Server* server, Surface* surface, Surface* parent);
+  ~Subsurface();
+
+  Surface* surface;
+
+  void set_position(wl_resource*, int32_t x, int32_t y);
+  void place_above(wl_resource*, wl_resource* sibling_res);
+  void place_below(wl_resource*, wl_resource* sibling_res);
+  void set_sync(wl_resource*);
+  void set_desync(wl_resource*);
+
+ private:
+  Server* server_;
+  Surface* parent_;
+};
+
+// wl_compositor
+class Compositor {
+ public:
+  explicit Compositor(Server* server);
+  Server* server;
+
+  void create_surface(wl_client* client, wl_resource* res, uint32_t id);
+  void create_region(wl_client* client, wl_resource* res, uint32_t id);
+
+ private:
+  Global global_;
+};
+
+// wl_subcompositor
+class Subcompositor {
+ public:
+  explicit Subcompositor(Server* server);
+  Server* server;
+
+  void get_subsurface(wl_client* client, wl_resource* res, uint32_t id,
+                      wl_resource* surface_res, wl_resource* parent_res);
+
+ private:
+  Global global_;
 };
 
 }  // namespace oasis

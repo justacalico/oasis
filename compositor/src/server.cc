@@ -6,6 +6,7 @@
 #include <cstring>
 #include "flutter.h"
 #include "log.h"
+#include "protocols.h"
 #include "renderer.h"
 #include "seat.h"
 #include "surface.h"
@@ -13,21 +14,10 @@
 
 namespace oasis {
 
-void compositor_global_init(Server*);
-void subcompositor_global_init(Server*);
-void shm_global_init(Server*);
-void xdg_global_init(Server*);
-void output_global_init(Server*, Backend::Output*);
-void data_device_global_init(Server*);
-void dmabuf_global_init(Server*);
-void decoration_global_init(Server*);
-void viewporter_global_init(Server*);
-
-static uint32_t g_toplevel_id = 0;
+Server::~Server() = default;
 
 // Procedural arrow cursor (32x32), white fill with dark outline.
-uint32_t cursor_arrow_pixels[32 * 32];
-void build_cursor() {
+void Server::build_cursor() {
   static const char* shape[22] = {
       "X                    ",
       "XX                   ",
@@ -51,14 +41,14 @@ void build_cursor() {
       "        XaX          ",
       "         XX          ",
       "                     "};
-  memset(cursor_arrow_pixels, 0, sizeof(cursor_arrow_pixels));
+  cursor_pixels_.fill(0);
   for (int y = 0; y < 22; y++)
     for (int x = 0; x < 22; x++) {
       char c = shape[y][x];
       if (c == 'X')
-        cursor_arrow_pixels[y * 32 + x] = 0xff1c1c1e;
+        cursor_pixels_[y * 32 + x] = 0xff1c1c1e;
       else if (c == 'a')
-        cursor_arrow_pixels[y * 32 + x] = 0xfff5f5f7;
+        cursor_pixels_[y * 32 + x] = 0xfff5f5f7;
     }
 }
 
@@ -68,15 +58,11 @@ Backend::Output* Server::primary_output() {
 }
 
 void Server::schedule_windows_notify() {
-  if (windows_idle || !flutter || !flutter->running()) return;
-  windows_idle = wl_event_loop_add_idle(
-      loop,
-      [](void* data) {
-        auto* s = static_cast<Server*>(data);
-        s->windows_idle = nullptr;
-        s->flutter->notify_windows();
-      },
-      this);
+  if (windows_idle_ || !flutter || !flutter->running()) return;
+  windows_idle_ = EventSource::when_idle(loop, [this] {
+    windows_idle_.reset();
+    flutter->notify_windows();
+  });
 }
 
 void Server::raise(XdgToplevel* t) {
@@ -87,20 +73,14 @@ void Server::raise(XdgToplevel* t) {
   v.push_back(t);
   if (!t->activated) {
     t->activated = true;
-    std::vector<uint32_t> states = {XDG_TOPLEVEL_STATE_ACTIVATED};
-    if (t->maximized) states.push_back(XDG_TOPLEVEL_STATE_MAXIMIZED);
-    if (t->fullscreen) states.push_back(XDG_TOPLEVEL_STATE_FULLSCREEN);
-    t->send_configure(t->surface() ? t->surface()->width() : 0,
-                      t->surface() ? t->surface()->height() : 0, states);
+    Surface* s = t->surface();
+    t->send_configure(s ? s->width() : 0, s ? s->height() : 0, t->states());
   }
   // deactivate the previously topmost window
   for (XdgToplevel* o : v) {
     if (o != t && o->activated) {
       o->activated = false;
-      std::vector<uint32_t> states;
-      if (o->maximized) states.push_back(XDG_TOPLEVEL_STATE_MAXIMIZED);
-      if (o->fullscreen) states.push_back(XDG_TOPLEVEL_STATE_FULLSCREEN);
-      o->send_configure(0, 0, states);
+      o->send_configure(0, 0, o->states());
     }
   }
   mark_dirty();
@@ -109,7 +89,7 @@ void Server::raise(XdgToplevel* t) {
 
 void Server::add_toplevel(XdgToplevel* t) {
   LOGI("toplevel mapped: %s (%s)", t->title.c_str(), t->app_id.c_str());
-  if (t->id == 0) t->id = ++g_toplevel_id;
+  if (t->id == 0) t->id = ++next_toplevel_id_;
   if (!t->maximized && !t->fullscreen) {
     size_t n = toplevels.size();
     Backend::Output* o = primary_output();
@@ -130,9 +110,8 @@ void Server::remove_toplevel(XdgToplevel* t) {
   schedule_windows_notify();
 }
 
-bool Server::surface_contains(Surface* s, double x, double y, double* sx,
-                              double* sy) {
-  return s->hit(x, y, sx, sy);
+void Server::remove_popup(XdgPopup* p) {
+  popups.erase(std::remove(popups.begin(), popups.end(), p), popups.end());
 }
 
 Surface* Server::surface_at(double x, double y, Surface** out_surface,
@@ -196,7 +175,7 @@ void Server::render(Backend::Output* o) {
   }
   if (!cursor_theme_tex) {
     cursor_theme_tex =
-        renderer->texture_from_pixels(32, 32, cursor_arrow_pixels);
+        renderer->texture_from_pixels(32, 32, cursor_pixels_.data());
     cursor_theme_w = 32;
     cursor_theme_h = 32;
     cursor_theme_hx = 2;
@@ -211,16 +190,16 @@ void Server::render(Backend::Output* o) {
 
   for (XdgToplevel* t : toplevels) {
     Surface* s = t->surface();
-    if (s) draw_surface_tree(renderer, s, t->x, t->y);
+    if (s) draw_surface_tree(renderer.get(), s, t->x, t->y);
   }
   for (XdgPopup* p : popups)
-    if (p->surface) draw_surface_tree(renderer, p->surface, p->lx, p->ly);
+    if (p->surface) draw_surface_tree(renderer.get(), p->surface, p->lx, p->ly);
 
   // cursor
   int32_t cx = (int32_t)cursor_x, cy = (int32_t)cursor_y;
   if (cursor_surface && cursor_surface->buffer) {
     Surface* cs = cursor_surface;
-    GLuint tex = cs->buffer->texture(renderer);
+    GLuint tex = cs->buffer->texture(renderer.get());
     renderer->texture(tex, cx - cs->buf_dx - cursor_hx,
                       cy - cs->buf_dy - cursor_hy, cs->width(), cs->height(),
                       cs->buffer_transform, cs->buffer->opaque());
@@ -235,50 +214,56 @@ void Server::render(Backend::Output* o) {
 
 // ------------------------------------------------------------------ wl_output
 
-static void output_bind_resource(wl_client* client, void* data,
-                                 uint32_t version, uint32_t id) {
-  auto* out = static_cast<Backend::Output*>(data);
+static const struct wl_output_interface output_impl = {destroy_request};
+
+OutputGlobal::OutputGlobal(Server* server, Backend::Output* out) : out_(out) {
+  global_.create(server->display, &wl_output_interface, 4,
+                 [this](wl_client* c, uint32_t v, uint32_t id) {
+                   bind(c, v, id);
+                 });
+}
+
+void OutputGlobal::bind(wl_client* client, uint32_t version, uint32_t id) {
   version = std::min<uint32_t>(version, 4);
   wl_resource* res =
       wl_resource_create(client, &wl_output_interface, version, id);
-  wl_resource_set_implementation(res, nullptr, out, [](wl_resource* r) {
-    auto* out = static_cast<Backend::Output*>(wl_resource_get_user_data(r));
-    auto& v = out->resources;
-    v.erase(std::remove(v.begin(), v.end(), r), v.end());
-  });
-  out->resources.push_back(res);
-  wl_output_send_geometry(res, out->x, out->y, out->phys_w, out->phys_h,
-                          WL_OUTPUT_SUBPIXEL_UNKNOWN, out->make.c_str(),
-                          out->model.c_str(), WL_OUTPUT_TRANSFORM_NORMAL);
+  wl_resource_set_implementation(res, &output_impl, out_,
+                                 &OutputGlobal::resource_destroyed);
+  out_->resources.push_back(res);
+  wl_output_send_geometry(res, out_->x, out_->y, out_->phys_w, out_->phys_h,
+                          WL_OUTPUT_SUBPIXEL_UNKNOWN, out_->make.c_str(),
+                          out_->model.c_str(), WL_OUTPUT_TRANSFORM_NORMAL);
   if (version >= WL_OUTPUT_NAME_SINCE_VERSION)
-    wl_output_send_name(res, out->name.c_str());
+    wl_output_send_name(res, out_->name.c_str());
   if (version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
-    wl_output_send_description(res, out->model.c_str());
+    wl_output_send_description(res, out_->model.c_str());
   wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
-                      out->width, out->height, out->refresh);
+                      out_->width, out_->height, out_->refresh);
   if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
-    wl_output_send_scale(res, out->scale);
+    wl_output_send_scale(res, out_->scale);
   wl_output_send_done(res);
 }
 
-void output_global_init(Server* server, Backend::Output* out) {
-  wl_global_create(server->display, &wl_output_interface, 4, out,
-                   output_bind_resource);
+void OutputGlobal::resource_destroyed(wl_resource* res) {
+  auto* out = user_data<Backend::Output>(res);
+  auto& v = out->resources;
+  v.erase(std::remove(v.begin(), v.end(), res), v.end());
 }
 
-void output_send_mode_changed(Backend::Output* out) {
-  for (wl_resource* res : out->resources) {
+void OutputGlobal::send_mode() {
+  for (wl_resource* res : out_->resources) {
     wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
-                        out->width, out->height, out->refresh);
+                        out_->width, out_->height, out_->refresh);
     wl_output_send_done(res);
   }
 }
 
-}  // namespace oasis
+void Server::send_mode(Backend::Output* out) {
+  for (auto& og : output_globals)
+    if (og->output() == out) og->send_mode();
+}
 
 // ------------------------------------------------------------ init & run
-
-namespace oasis {
 
 bool Server::init(const Config& cfg) {
   display = wl_display_create();
@@ -309,24 +294,22 @@ bool Server::init(const Config& cfg) {
   backend = nested ? create_wayland_backend() : create_drm_backend();
   if (!backend) return false;
 
-  static wl_listener client_listener = {};
-  client_listener.notify = [](wl_listener*, void* data) {
-    LOGI("client connected: %p", data);
-  };
-  wl_display_add_client_created_listener(display, &client_listener);
+  client_created_.set(
+      [](void* client) { LOGI("client connected: %p", client); });
+  wl_display_add_client_created_listener(display, client_created_.native());
 
-  seat = new Seat(this);
+  seat = std::make_unique<Seat>(this);
   seat->init();
 
   Backend::Callbacks cbs;
   cbs.frame = [this](Backend::Output* o) { render(o); };
   cbs.pointer_motion = [this](double x, double y, uint32_t t) {
     seat->motion(x, y, t);
-    if (dragging) dnd_motion(x, y, t);
+    if (data_manager) data_manager->dnd_motion(x, y, t);
   };
   cbs.pointer_button = [this](uint32_t b, bool p, uint32_t t) {
     seat->button(b, p, t);
-    if (dragging && !p) dnd_drop(t);
+    if (data_manager && !p) data_manager->dnd_drop(t);
   };
   cbs.pointer_axis = [this](double dx, double dy, uint32_t t) {
     seat->axis(dx, dy, t);
@@ -337,25 +320,27 @@ bool Server::init(const Config& cfg) {
   };
   cbs.keymap = [this](const std::string& s) { seat->set_keymap(s); };
   cbs.output_resized = [this](Backend::Output* o, int32_t w, int32_t h) {
-    output_send_mode_changed(o);
+    send_mode(o);
     if (flutter) flutter->metrics(w, h, (double)o->scale);
     mark_dirty();
   };
+  cbs.quit = [this] { quit(); };
   if (!backend->init(loop, std::move(cbs))) return false;
 
-  renderer = new Renderer();
+  renderer = std::make_unique<Renderer>();
 
-  compositor_global_init(this);
-  subcompositor_global_init(this);
-  shm_global_init(this);
-  xdg_global_init(this);
-  data_device_global_init(this);
-  decoration_global_init(this);
-  viewporter_global_init(this);
-  for (Backend::Output* o : backend->outputs()) output_global_init(this, o);
-  dmabuf_global_init(this);
+  compositor = std::make_unique<Compositor>(this);
+  subcompositor = std::make_unique<Subcompositor>(this);
+  shm = std::make_unique<Shm>(this);
+  shell = std::make_unique<XdgShell>(this);
+  data_manager = std::make_unique<DataDeviceManager>(this);
+  decorations = std::make_unique<DecorationManager>(this);
+  viewporter = std::make_unique<Viewporter>(this);
+  for (Backend::Output* o : backend->outputs())
+    output_globals.push_back(std::make_unique<OutputGlobal>(this, o));
+  dmabuf = std::make_unique<Dmabuf>(this);
 
-  flutter = new FlutterHost();
+  flutter = std::make_unique<FlutterHost>();
   if (!cfg.bundle_dir.empty() &&
       !flutter->init(this, cfg.bundle_dir.c_str(), cfg.engine_dir.c_str())) {
     LOGE("flutter engine failed to start; shell UI will be blank");

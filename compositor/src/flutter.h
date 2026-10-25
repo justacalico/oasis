@@ -5,7 +5,9 @@
 #include <GLES2/gl2.h>
 #include <xkbcommon/xkbcommon.h>
 #include <cstdint>
+#include <set>
 #include <string>
+#include <vector>
 #include "flutter_embedder.h"
 
 namespace oasis {
@@ -18,6 +20,8 @@ class XdgToplevel;
 // a string-codec platform channel carrying JSON.
 class FlutterHost {
  public:
+  ~FlutterHost() { shutdown(); }
+
   bool init(Server* server, const char* bundle_dir, const char* engine_dir);
   void shutdown();
   bool running() const { return engine_ != nullptr; }
@@ -52,6 +56,8 @@ class FlutterHost {
   FlutterEngineProcTable api_{};
   pid_t main_tid_ = 0;
   wl_event_loop* loop_ = nullptr;
+  FlutterTaskRunnerDescription platform_runner_{};
+  FlutterCustomTaskRunners runners_{};
 
   EGLDisplay dpy_ = EGL_NO_DISPLAY;
   EGLContext rctx_ = EGL_NO_CONTEXT;   // engine render thread
@@ -72,7 +78,9 @@ class FlutterHost {
   EGLSyncKHR fence_ = EGL_NO_SYNC_KHR;
   bool have_frame_ = false;
 
+  std::set<uint32_t> pressed_keys_;
   std::string bundle_, enginedir_;
+  std::vector<uint8_t> jit_vm_, jit_iso_;
 };
 
 }  // namespace oasis
