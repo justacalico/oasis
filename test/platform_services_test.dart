@@ -37,6 +37,36 @@ void main() {
       expect(await loader.load(), isEmpty);
     });
 
+    test('caches the scan until reloaded', () async {
+      final dir = await Directory.systemTemp.createTemp('entries');
+      addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/one.desktop').writeAsStringSync(
+        '[Desktop Entry]\nName=One\nExec=one\n',
+      );
+
+      final loader = DesktopEntriesLoader([dir]);
+      expect((await loader.load()).map((e) => e.name), ['One']);
+
+      File('${dir.path}/two.desktop').writeAsStringSync(
+        '[Desktop Entry]\nName=Two\nExec=two\n',
+      );
+      expect((await loader.load()).map((e) => e.name), ['One']);
+      expect((await loader.reload()).map((e) => e.name), ['One', 'Two']);
+    });
+
+    test('skips entries that fail to read', () async {
+      final dir = await Directory.systemTemp.createTemp('entries');
+      addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/bad.desktop')
+          .writeAsBytesSync([0xFF, 0xFE, 0x41]);
+      File('${dir.path}/good.desktop').writeAsStringSync(
+        '[Desktop Entry]\nName=Good\nExec=good\n',
+      );
+
+      final entries = await DesktopEntriesLoader([dir]).load();
+      expect(entries.map((e) => e.name), ['Good']);
+    });
+
     test('default loader points at the applications dirs', () {
       final loader = defaultEntriesLoader();
       expect(loader, isA<DesktopEntriesLoader>());

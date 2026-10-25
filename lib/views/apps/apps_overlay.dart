@@ -32,11 +32,11 @@ class _AppsOverlayState extends State<AppsOverlay> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    _load(widget.loader.load);
   }
 
-  Future<void> _reload() async {
-    final entries = await widget.loader.load();
+  Future<void> _load(Future<List<DesktopEntry>> Function() source) async {
+    final entries = await source();
     if (mounted) setState(() => _entries = entries);
   }
 
@@ -127,7 +127,8 @@ class _AppsOverlayState extends State<AppsOverlay> {
                             tooltip: l.refresh,
                             color: Colors.white,
                             icon: const Icon(Icons.refresh),
-                            onPressed: _reload,
+                            onPressed: () =>
+                                _load(widget.loader.reload),
                           ),
                         ],
                       ),

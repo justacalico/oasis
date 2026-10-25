@@ -6,6 +6,8 @@ import 'process_runner.dart';
 class DesktopEntriesLoader {
   const DesktopEntriesLoader();
 
+  Future<List<DesktopEntry>> reload() => load();
+
   Future<List<DesktopEntry>> load() async => const [
         DesktopEntry(
           id: 'oasis-web-terminal',

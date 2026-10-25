@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:oasis/l10n/app_localizations.dart';
 import 'package:oasis/services/battery.dart';
 import 'package:oasis/state/app_state.dart';
+import 'package:oasis/views/desktop/dock.dart';
 import 'package:oasis/views/desktop/top_panel.dart';
 
 import 'helpers.dart';
@@ -77,6 +78,17 @@ void main() {
       'systemctl reboot',
       'systemctl poweroff',
     ]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('dock launches entries through the launcher', (tester) async {
+    final runner = RecordingRunner();
+    await pumpShell(tester, services: fakeServices(runner: runner));
+    tester.widget<OasisDock>(find.byType(OasisDock)).onLaunch(
+      fixtureEntries.first,
+    );
+    await tester.pump();
+    expect(runner.calls, ['gtk-launch org.test.terminal']);
     await tester.pumpWidget(const SizedBox());
   });
 

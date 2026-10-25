@@ -55,6 +55,12 @@ class FakeEntriesLoader extends DesktopEntriesLoader {
     calls++;
     return result;
   }
+
+  @override
+  Future<List<DesktopEntry>> reload() async {
+    calls++;
+    return result;
+  }
 }
 
 class FakeBatteryReader extends SysfsBatteryReader {

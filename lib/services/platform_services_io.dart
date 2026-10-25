@@ -4,27 +4,45 @@ import '../models/desktop_entry.dart';
 import 'battery.dart';
 import 'process_runner.dart';
 
-/// Lists .desktop entries from the given applications directories.
+/// Lists .desktop entries from the given applications directories. The first
+/// [load] scans the disk once and caches the result; [reload] rescans.
 class DesktopEntriesLoader {
   final List<Directory> directories;
 
-  const DesktopEntriesLoader(this.directories);
+  DesktopEntriesLoader(this.directories);
 
-  Future<List<DesktopEntry>> load() async {
-    final entries = <String, DesktopEntry>{};
+  Future<List<DesktopEntry>>? _cache;
+
+  Future<List<DesktopEntry>> load() => _cache ??= _scan();
+
+  Future<List<DesktopEntry>> reload() => _cache = _scan();
+
+  Future<List<DesktopEntry>> _scan() async {
+    final files = <File>[];
     for (final dir in directories) {
       if (!await dir.exists()) continue;
       await for (final entity in dir.list(followLinks: false)) {
-        if (entity is! File || !entity.path.endsWith('.desktop')) continue;
-        final id = entity.uri.pathSegments.last.replaceAll('.desktop', '');
-        final contents = await entity.readAsString();
-        final entry = DesktopEntry.parse(id, contents);
-        if (entry != null) entries[id] = entry;
+        if (entity is File && entity.path.endsWith('.desktop')) {
+          files.add(entity);
+        }
       }
     }
-    final list = entries.values.toList()
+    final parsed = await Future.wait(files.map(_readEntry));
+    final entries = <String, DesktopEntry>{};
+    for (final entry in parsed) {
+      if (entry != null) entries[entry.id] = entry;
+    }
+    return entries.values.toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return list;
+  }
+
+  Future<DesktopEntry?> _readEntry(File file) async {
+    try {
+      final id = file.uri.pathSegments.last.replaceAll('.desktop', '');
+      return DesktopEntry.parse(id, await file.readAsString());
+    } catch (_) {
+      return null;
+    }
   }
 }
 
