@@ -1,0 +1,46 @@
+name: oasis
+description: "A Wayland desktop environment shell for Linux."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  provider: ^6.1.5+1
+  http: ^1.6.0
+  package_info_plus: ^9.0.0
+  url_launcher: ^6.3.2
+  shared_preferences: ^2.5.3
+  window_manager: ^0.5.1
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  generate: true
+  uses-material-design: true
+  assets:
+    - assets/icon.png
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+
+flutter_launcher_icons:
+  image_path: "assets/icon.png"
+  web:
+    generate: true
+    background_color: "#0B3D5C"
+    theme_color: "#1F8A70"
