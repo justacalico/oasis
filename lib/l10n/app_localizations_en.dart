@@ -25,15 +25,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navAbout => 'About';
 
   @override
-  String get windowClose => 'Close';
-
-  @override
-  String get windowMinimize => 'Minimise';
-
-  @override
-  String get windowZoom => 'Zoom';
-
-  @override
   String get searchApps => 'Search applications';
 
   @override

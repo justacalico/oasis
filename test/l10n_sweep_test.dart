@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:oasis/l10n/app_localizations.dart';
 import 'package:oasis/models/app_update.dart';
 import 'package:oasis/services/battery.dart';
-import 'package:oasis/services/window_actions_stub.dart' as stub;
 import 'package:oasis/views/about/about_page.dart';
 import 'package:oasis/views/desktop/quick_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -114,16 +113,6 @@ void main() {
       await tester.pump();
     });
   }
-
-  test('stub window actions are no-ops', () async {
-    const actions = stub.WindowActions();
-    await actions.close();
-    await actions.minimize();
-    await actions.toggleMaximize();
-    await actions.startDragging();
-    expect(await actions.isMaximized(), isFalse);
-    expect(stub.defaultWindowActions(), isA<stub.WindowActions>());
-  });
 
   test('l10n delegate throws for an unsupported locale', () {
     expect(

@@ -4,8 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-/// Hides the native title bar on desktop so the app can draw its own
-/// macOS-style top bar.
+/// Sizes and centres the desktop window before showing it.
 Future<void> initializeWindow() async {
   if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
     return;
@@ -20,8 +19,7 @@ Future<void> initializeWindow() async {
     title: 'Oasis',
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.hidden,
-    windowButtonVisibility: false,
+    titleBarStyle: TitleBarStyle.normal,
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {

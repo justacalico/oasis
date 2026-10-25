@@ -25,15 +25,6 @@ class AppLocalizationsGa extends AppLocalizations {
   String get navAbout => 'Faoi';
 
   @override
-  String get windowClose => 'Dún';
-
-  @override
-  String get windowMinimize => 'Íoslaghdaigh';
-
-  @override
-  String get windowZoom => 'Súmáil';
-
-  @override
   String get searchApps => 'Cuardaigh feidhmchláir';
 
   @override
