@@ -1,11 +1,11 @@
 {
-    "name": "oasis",
-    "short_name": "oasis",
+    "name": "Oasis",
+    "short_name": "Oasis",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0B3D5C",
     "theme_color": "#1F8A70",
-    "description": "A new Flutter project.",
+    "description": "A Wayland desktop environment shell for Linux",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

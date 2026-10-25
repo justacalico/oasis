@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Oasis
+Comment=A Wayland desktop environment shell
+Exec=oasis
+Icon=gitlab.httpanimations.oasis
+Terminal=false
+Categories=Utility;

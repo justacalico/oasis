@@ -1,17 +1,56 @@
-# oasis
+# Oasis
 
-A new Flutter project.
+[![pipeline](https://gitlab.com/HttpAnimations/oasis/badges/main/pipeline.svg)](https://gitlab.com/HttpAnimations/oasis/-/pipelines)
+[![release](https://gitlab.com/HttpAnimations/oasis/-/badges/release.svg)](https://gitlab.com/HttpAnimations/oasis/-/releases)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![pages](https://img.shields.io/badge/site-gitlab.io-orange)](https://httpanimations.gitlab.io/oasis/)
 
-## Getting Started
+A desktop environment shell for Wayland, built with Flutter. Oasis gives your
+Linux machine a fast, beautiful desktop: a live panel, a real application
+launcher that reads your installed apps, session controls, and a settings
+experience that feels at home.
 
-This project is a starting point for a Flutter application.
+**[Landing page](https://httpanimations.gitlab.io/oasis/)** ·
+**[Try the web build](https://httpanimations.gitlab.io/oasis/app/)** ·
+**[Releases](https://gitlab.com/HttpAnimations/oasis/-/releases)**
 
-A few resources to get you started if this is your first Flutter project:
+![Oasis desktop](test/goldens/desktop.png)
+![Applications](test/goldens/apps.png)
+![Settings](test/goldens/settings.png)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Features
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- Painted wallpapers, no image assets needed
+- Launcher that reads real .desktop files
+- Panel with clock, battery and quick settings
+- Session actions: lock, suspend, restart, power off
+- macOS-style window chrome with drag and double-click maximise
+- Light and dark themes, Traditional English, 简体中文, Русский, Gaeilge
+- In-app update checks against GitLab releases
+
+## Install
+
+Flatpak (x86_64 and aarch64):
+
+```
+curl -fLO https://httpanimations.gitlab.io/oasis/flatpak/key.gpg
+flatpak remote-add --if-not-exists --gpg-import=key.gpg oasis https://httpanimations.gitlab.io/oasis/flatpak
+flatpak install oasis gitlab.httpanimations.oasis
+```
+
+Or one line with the flatpakref:
+
+```
+flatpak install https://httpanimations.gitlab.io/oasis/oasis.flatpakref
+```
+
+Binaries for every release are on the
+[releases page](https://gitlab.com/HttpAnimations/oasis/-/releases): AppImage,
+`.deb`, `.rpm`, and plain archives.
+
+## Development
+
+- `flutter test` runs the suite; coverage stays at 100%
+- `flutter test --update-goldens` regenerates screenshots
+- `flutter run -d linux` runs the shell
+- `landing/` is the landing page (Flutter web); `flutter build web` there
