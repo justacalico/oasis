@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-_CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+_CI_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -f "$_CI_DIR/ci.env" ] && . "$_CI_DIR/ci.env"
 
 git fetch origin main "+refs/tags/*:refs/tags/*"

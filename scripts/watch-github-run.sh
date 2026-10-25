@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Load per-project CI config (APP_NAME, APP_ID, GITHUB_REPO, GITLAB_PROJECT)
-_CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+_CI_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -f "$_CI_DIR/ci.env" ] && . "$_CI_DIR/ci.env"
 
 # Find and watch a GitHub Actions run, exiting 0 only when it concludes
