@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oasis/views/about/about_page.dart';
-import 'package:oasis/views/apps/apps_page.dart';
+import 'package:oasis/views/apps/apps_overlay.dart';
 import 'package:oasis/views/desktop/desktop_page.dart';
 import 'package:oasis/views/settings/settings_page.dart';
 import 'package:oasis/views/shell.dart';
@@ -23,18 +23,24 @@ void main() {
     final state = await pumpShell(tester);
     state.setDestinationIndex(1);
     await tester.pump();
-    expect(find.byType(AppsPage), findsOneWidget);
-
-    state.setDestinationIndex(2);
-    await tester.pump();
     expect(find.byType(SettingsPage), findsOneWidget);
 
-    state.setDestinationIndex(3);
+    state.setDestinationIndex(2);
     await tester.pump();
     expect(find.byType(AboutPage), findsOneWidget);
 
     state.setDestinationIndex(0);
     await tester.pump();
+    expect(find.byType(DesktopPage), findsOneWidget);
+  });
+
+  testWidgets('opening the launcher layers the apps overlay',
+      (tester) async {
+    final state = await pumpShell(tester);
+    expect(find.byType(AppsOverlay), findsNothing);
+    state.openLauncher();
+    await tester.pumpAndSettle();
+    expect(find.byType(AppsOverlay), findsOneWidget);
     expect(find.byType(DesktopPage), findsOneWidget);
   });
 

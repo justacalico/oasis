@@ -12,7 +12,7 @@ void main() {
   Future<OasisState> openSettings(WidgetTester tester,
       {Map<String, Object> prefs = const {}}) async {
     final state = await pumpShell(tester, prefs: prefs);
-    state.setDestinationIndex(2);
+    state.setDestinationIndex(1);
     await tester.pump();
     return state;
   }

@@ -45,21 +45,20 @@ void main() {
       await tester.tap(find.byKey(const Key('session_lock')));
       await tester.pumpAndSettle();
 
-      // Apps: grid, search empty state, failed launch snackbar.
-      state.setDestinationIndex(1);
-      await tester.pump();
-      await tester.pump();
-      await tester.tap(find.text('Terminal'));
+      // Apps overlay: grid, search empty state, failed launch snackbar.
+      state.openLauncher();
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('app_search')), 'zzz');
       await tester.pump();
       await tester.enterText(find.byKey(const Key('app_search')), '');
       await tester.pump();
+      await tester.tap(find.text('Terminal'));
+      await tester.pumpAndSettle();
 
       // Settings + About.
-      state.setDestinationIndex(2);
+      state.setDestinationIndex(1);
       await tester.pump();
-      state.setDestinationIndex(3);
+      state.setDestinationIndex(2);
       await tester.pump();
       await tester.pump();
 
