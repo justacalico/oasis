@@ -51,3 +51,7 @@ app.*.map.json
 *.jks
 key.properties
 .gpg-tmp/
+
+# compositor build artifacts
+compositor/engine/
+compositor/build/

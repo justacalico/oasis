@@ -5,6 +5,7 @@ import '../../l10n/app_localizations.dart';
 import '../../services/app_launcher.dart';
 import '../../services/platform_services.dart';
 import '../../services/battery.dart';
+import '../../services/compositor_service.dart';
 import '../../services/session_actions.dart';
 import '../../state/app_state.dart';
 import '../../widgets/wallpaper.dart';
@@ -19,12 +20,14 @@ class DesktopPage extends StatefulWidget {
   final SysfsBatteryReader reader;
   final SessionActions session;
   final AppLauncher launcher;
+  final CompositorService windows;
 
   const DesktopPage({
     super.key,
     required this.reader,
     required this.session,
     required this.launcher,
+    required this.windows,
   });
 
   @override
@@ -74,12 +77,18 @@ class _DesktopPageState extends State<DesktopPage> {
         ),
         Align(
           alignment: Alignment.bottomCenter,
-          child: OasisDock(
-            entries: const [],
-            onLaunch: (entry) =>
-                launchEntry(context, widget.launcher, entry),
-            onShowApps: () =>
-                context.read<OasisState>().openLauncher(),
+          child: ListenableBuilder(
+            listenable: widget.windows,
+            builder: (context, _) => OasisDock(
+              entries: const [],
+              windows: widget.windows.windows,
+              onLaunch: (entry) =>
+                  launchEntry(context, widget.launcher, entry),
+              onFocusWindow: (w) => widget.windows.focus(w.id),
+              onCloseWindow: (w) => widget.windows.close(w.id),
+              onShowApps: () =>
+                  context.read<OasisState>().openLauncher(),
+            ),
           ),
         ),
       ],

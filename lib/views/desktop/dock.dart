@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/compositor_window.dart';
 import '../../models/desktop_entry.dart';
 import '../../widgets/app_glyph.dart';
 
@@ -9,7 +10,10 @@ import '../../widgets/app_glyph.dart';
 /// shortcut to the applications grid.
 class OasisDock extends StatelessWidget {
   final List<DesktopEntry> entries;
+  final List<CompositorWindow> windows;
   final ValueChanged<DesktopEntry> onLaunch;
+  final ValueChanged<CompositorWindow>? onFocusWindow;
+  final ValueChanged<CompositorWindow>? onCloseWindow;
   final VoidCallback onShowApps;
 
   const OasisDock({
@@ -17,6 +21,9 @@ class OasisDock extends StatelessWidget {
     required this.entries,
     required this.onLaunch,
     required this.onShowApps,
+    this.windows = const [],
+    this.onFocusWindow,
+    this.onCloseWindow,
   });
 
   @override
@@ -45,6 +52,13 @@ class OasisDock extends StatelessWidget {
                   tooltip: entry.name,
                   onTap: () => onLaunch(entry),
                   child: AppGlyph(entry: entry, size: 48),
+                ),
+              for (final w in windows)
+                _WindowChip(
+                  key: Key('window_${w.id}'),
+                  window: w,
+                  onTap: () => onFocusWindow?.call(w),
+                  onClose: () => onCloseWindow?.call(w),
                 ),
               if (entries.isNotEmpty)
                 Container(
@@ -80,15 +94,75 @@ class OasisDock extends StatelessWidget {
   }
 }
 
+class _WindowChip extends StatelessWidget {
+  final CompositorWindow window;
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  const _WindowChip({
+    super.key,
+    required this.window,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final initial = window.title.isNotEmpty
+        ? window.title.characters.first.toUpperCase()
+        : '?';
+    return _DockIcon(
+      tooltip: window.title,
+      onTap: onTap,
+      onSecondaryTap: onClose,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: scheme.tertiaryContainer,
+              borderRadius: BorderRadius.circular(13),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              initial,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: scheme.onTertiaryContainer,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: window.focused ? 12 : 0,
+            height: 3,
+            decoration: BoxDecoration(
+              color: scheme.primary,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DockIcon extends StatefulWidget {
   final String tooltip;
   final VoidCallback onTap;
+  final VoidCallback? onSecondaryTap;
   final Widget child;
 
   const _DockIcon({
     super.key,
     required this.tooltip,
     required this.onTap,
+    this.onSecondaryTap,
     required this.child,
   });
 
@@ -108,6 +182,7 @@ class _DockIconState extends State<_DockIcon> {
         onExit: (_) => setState(() => _hovered = false),
         child: GestureDetector(
           onTap: widget.onTap,
+          onSecondaryTap: widget.onSecondaryTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 5),
             child: AnimatedScale(

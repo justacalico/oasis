@@ -10,6 +10,8 @@ Future<void> initializeWindow() async {
     return;
   }
 
+  if (Platform.environment['OASIS_COMPOSITOR'] == '1') return;
+
   await windowManager.ensureInitialized();
 
   const windowOptions = WindowOptions(
