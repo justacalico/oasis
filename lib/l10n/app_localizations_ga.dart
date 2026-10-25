@@ -13,16 +13,7 @@ class AppLocalizationsGa extends AppLocalizations {
   String get appTitle => 'Oasis';
 
   @override
-  String get navDesktop => 'Deasc';
-
-  @override
   String get navApps => 'Feidhmchláir';
-
-  @override
-  String get navSettings => 'Socruithe';
-
-  @override
-  String get navAbout => 'Faoi';
 
   @override
   String get searchApps => 'Cuardaigh feidhmchláir';

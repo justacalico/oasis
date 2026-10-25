@@ -1,10 +1,7 @@
 {
   "@@locale": "en",
   "appTitle": "Oasis",
-  "navDesktop": "Desktop",
   "navApps": "Applications",
-  "navSettings": "Settings",
-  "navAbout": "About",
   "searchApps": "Search applications",
   "noApps": "No applications found",
   "theme": "Theme",

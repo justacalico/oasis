@@ -13,16 +13,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get appTitle => 'Oasis';
 
   @override
-  String get navDesktop => 'Рабочий стол';
-
-  @override
   String get navApps => 'Приложения';
-
-  @override
-  String get navSettings => 'Настройки';
-
-  @override
-  String get navAbout => 'О программе';
 
   @override
   String get searchApps => 'Поиск приложений';

@@ -1,10 +1,7 @@
 {
   "@@locale": "zh",
   "appTitle": "Oasis",
-  "navDesktop": "桌面",
   "navApps": "应用程序",
-  "navSettings": "设置",
-  "navAbout": "关于",
   "searchApps": "搜索应用程序",
   "noApps": "未找到应用程序",
   "theme": "主题",

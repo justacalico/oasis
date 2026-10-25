@@ -1,10 +1,7 @@
 {
   "@@locale": "ga",
   "appTitle": "Oasis",
-  "navDesktop": "Deasc",
   "navApps": "Feidhmchláir",
-  "navSettings": "Socruithe",
-  "navAbout": "Faoi",
   "searchApps": "Cuardaigh feidhmchláir",
   "noApps": "Níor aimsíodh feidhmchláir",
   "theme": "Téama",

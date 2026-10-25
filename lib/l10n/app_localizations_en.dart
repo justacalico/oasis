@@ -13,16 +13,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'Oasis';
 
   @override
-  String get navDesktop => 'Desktop';
-
-  @override
   String get navApps => 'Applications';
-
-  @override
-  String get navSettings => 'Settings';
-
-  @override
-  String get navAbout => 'About';
 
   @override
   String get searchApps => 'Search applications';
