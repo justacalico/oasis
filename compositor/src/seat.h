@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "wl.h"
 
 namespace oasis {
 
@@ -21,7 +22,6 @@ class Seat {
   bool init();
 
   Server* server;
-  wl_global* global = nullptr;
 
   std::vector<wl_resource*> pointers;
   std::vector<wl_resource*> keyboards;
@@ -39,7 +39,8 @@ class Seat {
   std::string keymap_str;
   uint32_t mods_dep = 0, mods_lat = 0, mods_lock = 0, group = 0;
 
-  enum class Grab { None, Move, Resize } grab = Grab::None;
+  enum class Grab { None, Move, Resize };
+  Grab grab = Grab::None;
   XdgToplevel* grab_toplevel = nullptr;
   uint32_t grab_edges = 0;
   double grab_x = 0, grab_y = 0;  // pointer offset in toplevel
@@ -67,6 +68,22 @@ class Seat {
     return grab != Grab::None || !popup_stack.empty();
   }
   void release_popups_from(XdgPopup* p);
+
+  // wl_seat requests
+  void get_pointer(wl_client* client, wl_resource* res, uint32_t id);
+  void get_keyboard(wl_client* client, wl_resource* res, uint32_t id);
+  void get_touch(wl_client* client, wl_resource* res, uint32_t id);
+
+  // wl_pointer requests
+  void set_cursor(wl_resource* res, uint32_t serial,
+                  wl_resource* surface_res, int32_t hx, int32_t hy);
+
+ private:
+  void bind(wl_client* client, uint32_t version, uint32_t id);
+  static void pointer_destroyed(wl_resource* res);
+  static void keyboard_destroyed(wl_resource* res);
+
+  Global global_;
 };
 
 }  // namespace oasis

@@ -7,6 +7,7 @@
 #include <cstring>
 #include "flutter.h"
 #include "log.h"
+#include "protocols.h"
 #include "server.h"
 #include "surface.h"
 #include "util.h"
@@ -14,106 +15,15 @@
 
 namespace oasis {
 
-static void pointer_set_cursor(wl_client*, wl_resource* res, uint32_t serial,
-                               wl_resource* surface_res, int32_t hx,
-                               int32_t hy) {
-  auto* seat = static_cast<Seat*>(wl_resource_get_user_data(res));
-  Surface* s = surface_res
-      ? static_cast<Surface*>(wl_resource_get_user_data(surface_res))
-      : nullptr;
-  // Only honour cursor changes from the client that currently holds pointer
-  // focus, matching how other compositors arbitrate the cursor.
-  if (seat->pointer_focus &&
-      wl_resource_get_client(seat->pointer_focus->res) !=
-          wl_resource_get_client(res))
-    return;
-  seat->server->cursor_surface = s;
-  seat->server->cursor_hx = hx;
-  seat->server->cursor_hy = hy;
-  seat->server->mark_dirty();
-}
-
-static void pointer_release(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
+// ------------------------------------------------------------------ wl_seat
 
 static const struct wl_pointer_interface pointer_impl = {
-    pointer_set_cursor, pointer_release,
+    REQ(Seat, set_cursor), destroy_request,
 };
-
-static void seat_get_pointer(wl_client* client, wl_resource* res,
-                             uint32_t id) {
-  auto* seat = static_cast<Seat*>(wl_resource_get_user_data(res));
-  wl_resource* pres = wl_resource_create(
-      client, &wl_pointer_interface, wl_resource_get_version(res), id);
-  wl_resource_set_implementation(
-      pres, &pointer_impl, seat, [](wl_resource* r) {
-        auto* seat = static_cast<Seat*>(wl_resource_get_user_data(r));
-        auto& v = seat->pointers;
-        v.erase(std::remove(v.begin(), v.end(), r), v.end());
-      });
-  seat->pointers.push_back(pres);
-  if (seat->pointer_focus &&
-      wl_resource_get_client(seat->pointer_focus->res) == client) {
-    wl_pointer_send_enter(pres, wl_display_next_serial(seat->server->display),
-                          seat->pointer_focus->res,
-                          wl_fixed_from_double(seat->focus_sx),
-                          wl_fixed_from_double(seat->focus_sy));
-  }
-}
-
-static void seat_get_keyboard(wl_client* client, wl_resource* res,
-                              uint32_t id) {
-  auto* seat = static_cast<Seat*>(wl_resource_get_user_data(res));
-  wl_resource* kres = wl_resource_create(
-      client, &wl_keyboard_interface, wl_resource_get_version(res), id);
-  wl_resource_set_implementation(
-      kres, nullptr, seat, [](wl_resource* r) {
-        auto* seat = static_cast<Seat*>(wl_resource_get_user_data(r));
-        auto& v = seat->keyboards;
-        v.erase(std::remove(v.begin(), v.end(), r), v.end());
-      });
-  seat->keyboards.push_back(kres);
-  seat->send_keymap(kres);
-  if (wl_resource_get_version(kres) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
-    wl_keyboard_send_repeat_info(kres, 0, 0);
-  if (seat->keyboard_focus &&
-      wl_resource_get_client(seat->keyboard_focus->res) == client) {
-    wl_array keys;
-    wl_array_init(&keys);
-    wl_keyboard_send_enter(kres,
-                           wl_display_next_serial(seat->server->display),
-                           seat->keyboard_focus->res, &keys);
-    wl_keyboard_send_modifiers(kres,
-                               wl_display_next_serial(seat->server->display),
-                               seat->mods_dep, seat->mods_lat, seat->mods_lock,
-                               seat->group);
-  }
-}
-
-static void seat_get_touch(wl_client* client, wl_resource* res, uint32_t id) {
-  wl_resource* tres = wl_resource_create(
-      client, &wl_touch_interface, wl_resource_get_version(res), id);
-  wl_resource_set_implementation(tres, nullptr, nullptr, nullptr);
-}
 
 static const struct wl_seat_interface seat_impl = {
-    seat_get_pointer, seat_get_keyboard, seat_get_touch,
+    REQ(Seat, get_pointer), REQ(Seat, get_keyboard), REQ(Seat, get_touch),
 };
-
-static void seat_bind(wl_client* client, void* data, uint32_t version,
-                      uint32_t id) {
-  auto* seat = static_cast<Seat*>(data);
-  version = std::min<uint32_t>(version, 5);
-  wl_resource* res =
-      wl_resource_create(client, &wl_seat_interface, version, id);
-  wl_resource_set_implementation(res, &seat_impl, seat, nullptr);
-  uint32_t caps =
-      WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD;
-  wl_seat_send_capabilities(res, caps);
-  if (version >= WL_SEAT_NAME_SINCE_VERSION)
-    wl_seat_send_name(res, "oasis-seat0");
-}
 
 Seat::Seat(Server* s) : server(s) {
   xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -127,10 +37,89 @@ Seat::~Seat() {
 }
 
 bool Seat::init() {
-  global = wl_global_create(server->display, &wl_seat_interface, 5, this,
-                            seat_bind);
-  return global != nullptr;
+  return global_.create(server->display, &wl_seat_interface, 5,
+                        [this](wl_client* c, uint32_t v, uint32_t id) {
+                          bind(c, v, id);
+                        });
 }
+
+void Seat::bind(wl_client* client, uint32_t version, uint32_t id) {
+  version = std::min<uint32_t>(version, 5);
+  wl_resource* res =
+      wl_resource_create(client, &wl_seat_interface, version, id);
+  wl_resource_set_implementation(res, &seat_impl, this, nullptr);
+  uint32_t caps = WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD;
+  wl_seat_send_capabilities(res, caps);
+  if (version >= WL_SEAT_NAME_SINCE_VERSION)
+    wl_seat_send_name(res, "oasis-seat0");
+}
+
+void Seat::pointer_destroyed(wl_resource* res) {
+  auto* seat = user_data<Seat>(res);
+  auto& v = seat->pointers;
+  v.erase(std::remove(v.begin(), v.end(), res), v.end());
+}
+
+void Seat::keyboard_destroyed(wl_resource* res) {
+  auto* seat = user_data<Seat>(res);
+  auto& v = seat->keyboards;
+  v.erase(std::remove(v.begin(), v.end(), res), v.end());
+}
+
+void Seat::set_cursor(wl_resource* res, uint32_t serial,
+                      wl_resource* surface_res, int32_t hx, int32_t hy) {
+  Surface* s = surface_res ? user_data<Surface>(surface_res) : nullptr;
+  // Only honour cursor changes from the client that currently holds pointer
+  // focus, matching how other compositors arbitrate the cursor.
+  if (pointer_focus &&
+      wl_resource_get_client(pointer_focus->res) !=
+          wl_resource_get_client(res))
+    return;
+  server->cursor_surface = s;
+  server->cursor_hx = hx;
+  server->cursor_hy = hy;
+  server->mark_dirty();
+}
+
+void Seat::get_pointer(wl_client* client, wl_resource* res, uint32_t id) {
+  wl_resource* pres = wl_resource_create(
+      client, &wl_pointer_interface, wl_resource_get_version(res), id);
+  wl_resource_set_implementation(pres, &pointer_impl, this,
+                                 &Seat::pointer_destroyed);
+  pointers.push_back(pres);
+  if (pointer_focus && wl_resource_get_client(pointer_focus->res) == client) {
+    wl_pointer_send_enter(pres, wl_display_next_serial(server->display),
+                          pointer_focus->res, wl_fixed_from_double(focus_sx),
+                          wl_fixed_from_double(focus_sy));
+  }
+}
+
+void Seat::get_keyboard(wl_client* client, wl_resource* res, uint32_t id) {
+  wl_resource* kres = wl_resource_create(
+      client, &wl_keyboard_interface, wl_resource_get_version(res), id);
+  wl_resource_set_implementation(kres, nullptr, this,
+                                 &Seat::keyboard_destroyed);
+  keyboards.push_back(kres);
+  send_keymap(kres);
+  if (wl_resource_get_version(kres) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+    wl_keyboard_send_repeat_info(kres, 0, 0);
+  if (keyboard_focus && wl_resource_get_client(keyboard_focus->res) == client) {
+    wl_array keys;
+    wl_array_init(&keys);
+    wl_keyboard_send_enter(kres, wl_display_next_serial(server->display),
+                           keyboard_focus->res, &keys);
+    wl_keyboard_send_modifiers(kres, wl_display_next_serial(server->display),
+                               mods_dep, mods_lat, mods_lock, group);
+  }
+}
+
+void Seat::get_touch(wl_client* client, wl_resource* res, uint32_t id) {
+  wl_resource* tres = wl_resource_create(
+      client, &wl_touch_interface, wl_resource_get_version(res), id);
+  wl_resource_set_implementation(tres, nullptr, nullptr, nullptr);
+}
+
+// ------------------------------------------------------------------ keymap
 
 void Seat::set_keymap(const std::string& str) {
   xkb_keymap* km = nullptr;
@@ -158,14 +147,13 @@ void Seat::set_keymap(const std::string& str) {
 }
 
 void Seat::send_keymap(wl_resource* kbd) {
-  int fd = memfd_create_cloexec("oasis-keymap");
-  if (fd < 0) return;
-  ftruncate(fd, keymap_str.size() + 1);
-  write_all(fd, keymap_str.data(), keymap_str.size() + 1);
-  lseek(fd, 0, SEEK_SET);
-  wl_keyboard_send_keymap(kbd, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd,
+  Fd fd(memfd_create_cloexec("oasis-keymap"));
+  if (!fd) return;
+  ftruncate(fd.get(), keymap_str.size() + 1);
+  write_all(fd.get(), keymap_str.data(), keymap_str.size() + 1);
+  lseek(fd.get(), 0, SEEK_SET);
+  wl_keyboard_send_keymap(kbd, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd.get(),
                           keymap_str.size() + 1);
-  close(fd);
 }
 
 void Seat::send_modifiers() {
@@ -177,6 +165,8 @@ void Seat::send_modifiers() {
       wl_keyboard_send_modifiers(kbd, serial, mods_dep, mods_lat, mods_lock,
                                  group);
 }
+
+// ------------------------------------------------------------------- focus
 
 void Seat::set_pointer_focus(Surface* s, double sx, double sy) {
   if (s == pointer_focus) {
@@ -225,8 +215,10 @@ void Seat::set_keyboard_focus(Surface* s) {
     wl_array_release(&keys);
     send_modifiers();
   }
-  server->notify_selection();
+  server->data_manager->notify_selection();
 }
+
+// ------------------------------------------------------------------ events
 
 void Seat::motion(double x, double y, uint32_t t) {
   server->cursor_x = x;
@@ -257,8 +249,7 @@ void Seat::motion(double x, double y, uint32_t t) {
     if (h < 48) h = 48;
     tl->x = nx;
     tl->y = ny;
-    std::vector<uint32_t> states;
-    if (tl->activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
+    auto states = tl->states();
     states.push_back(XDG_TOPLEVEL_STATE_RESIZING);
     tl->send_configure(w, h, states);
     return;
@@ -286,7 +277,7 @@ void Seat::motion(double x, double y, uint32_t t) {
   }
   // shell pointer: over shell areas the events go to Flutter
   bool over_client = s != nullptr;
-  if (!over_client && server->flutter->running()) {
+  if (!over_client && server->flutter && server->flutter->running()) {
     if (!flutter_added) {
       server->flutter->pointer(4 /*kAdd*/, x, y, flutter_buttons, now_usec());
       flutter_added = true;
@@ -393,7 +384,7 @@ void Seat::key(uint32_t evdev, bool pressed, uint32_t t) {
         wl_keyboard_send_key(kbd, serial, t, evdev,
                              pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
                                      : WL_KEYBOARD_KEY_STATE_RELEASED);
-  } else if (server->flutter->running()) {
+  } else if (server->flutter && server->flutter->running()) {
     server->flutter->key(evdev, pressed, kbd_state, kc, now_usec());
   }
 }
@@ -405,6 +396,8 @@ void Seat::modifiers(uint32_t dep, uint32_t lat, uint32_t lock, uint32_t grp) {
   group = grp;
   send_modifiers();
 }
+
+// ------------------------------------------------------------------- grabs
 
 void Seat::begin_move(XdgToplevel* t) {
   grab = Grab::Move;

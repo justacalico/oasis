@@ -8,60 +8,60 @@
 
 namespace oasis {
 
-extern const struct xdg_toplevel_interface toplevel_impl;
-extern const struct xdg_popup_interface popup_impl;
-
-// ------------------------------------------------------------- Positioner
-
-static void positioner_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-static void positioner_set_size(wl_client*, wl_resource* res, int32_t w,
-                                int32_t h) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->w = w;
-  p->h = h;
-}
-static void positioner_set_anchor_rect(wl_client*, wl_resource* res,
-                                       int32_t x, int32_t y, int32_t w,
-                                       int32_t h) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->anchor_rect = {x, y, w, h};
-}
-static void positioner_set_anchor(wl_client*, wl_resource* res,
-                                  uint32_t anchor) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->anchor = anchor;
-}
-static void positioner_set_gravity(wl_client*, wl_resource* res,
-                                   uint32_t gravity) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->gravity = gravity;
-}
-static void positioner_set_constraint(wl_client*, wl_resource* res,
-                                      uint32_t c) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->constraint = c;
-}
-static void positioner_set_offset(wl_client*, wl_resource* res, int32_t x,
-                                  int32_t y) {
-  auto* p = static_cast<Positioner*>(wl_resource_get_user_data(res));
-  p->ox = x;
-  p->oy = y;
-}
-static void positioner_set_reactive(wl_client*, wl_resource*) {}
-static void positioner_set_parent_size(wl_client*, wl_resource*, int32_t,
-                                       int32_t) {}
-static void positioner_set_parent_configure(wl_client*, wl_resource*,
-                                            uint32_t) {}
+// -------------------------------------------------------- interface tables
 
 static const struct xdg_positioner_interface positioner_impl = {
-    positioner_destroy,      positioner_set_size,
-    positioner_set_anchor_rect, positioner_set_anchor,
-    positioner_set_gravity,  positioner_set_constraint,
-    positioner_set_offset,   positioner_set_reactive,
-    positioner_set_parent_size, positioner_set_parent_configure,
+    destroy_request,
+    REQ(Positioner, set_size),
+    REQ(Positioner, set_anchor_rect),
+    REQ(Positioner, set_anchor),
+    REQ(Positioner, set_gravity),
+    REQ(Positioner, set_constraint),
+    REQ(Positioner, set_offset),
+    REQ(Positioner, set_reactive),
+    REQ(Positioner, set_parent_size),
+    REQ(Positioner, set_parent_configure),
 };
+
+static const struct xdg_surface_interface xdg_surface_impl = {
+    destroy_request,
+    REQ(XdgSurface, get_toplevel),
+    REQ(XdgSurface, get_popup),
+    REQ(XdgSurface, set_window_geometry),
+    REQ(XdgSurface, ack_configure),
+};
+
+static const struct xdg_toplevel_interface toplevel_impl = {
+    destroy_request,
+    REQ(XdgToplevel, set_parent),
+    REQ(XdgToplevel, set_title),
+    REQ(XdgToplevel, set_app_id),
+    REQ(XdgToplevel, show_window_menu),
+    REQ(XdgToplevel, move),
+    REQ(XdgToplevel, resize),
+    REQ(XdgToplevel, set_max_size),
+    REQ(XdgToplevel, set_min_size),
+    REQ(XdgToplevel, set_maximized),
+    REQ(XdgToplevel, unset_maximized),
+    REQ(XdgToplevel, set_fullscreen),
+    REQ(XdgToplevel, unset_fullscreen),
+    REQ(XdgToplevel, set_minimized),
+};
+
+static const struct xdg_popup_interface popup_impl = {
+    destroy_request,
+    REQ(XdgPopup, grab),
+    REQ(XdgPopup, reposition),
+};
+
+static const struct xdg_wm_base_interface wm_impl = {
+    REQ(XdgShell, destroy),
+    REQ(XdgShell, create_positioner),
+    REQ(XdgShell, get_xdg_surface),
+    REQ(XdgShell, pong),
+};
+
+// ------------------------------------------------------------- Positioner
 
 void Positioner::resolve(int32_t parent_lx, int32_t parent_ly, int32_t out_w,
                          int32_t out_h, int32_t* lx, int32_t* ly) const {
@@ -185,6 +185,87 @@ void Positioner::resolve(int32_t parent_lx, int32_t parent_ly, int32_t out_w,
 
 // --------------------------------------------------------------- XdgSurface
 
+XdgSurface::XdgSurface(Server* srv, Surface* s) : server(srv), surface(s) {
+  s->xdg = this;
+}
+
+XdgSurface::~XdgSurface() {
+  if (surface) surface->xdg = nullptr;
+}
+
+void XdgSurface::get_toplevel(wl_client* client, wl_resource*, uint32_t id) {
+  if (toplevel || popup) {
+    wl_resource_post_error(res, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
+                           "surface already has a role");
+    return;
+  }
+  toplevel = bind_resource(client, &xdg_toplevel_interface,
+                           wl_resource_get_version(res), id,
+                           new XdgToplevel(server, this), &toplevel_impl);
+}
+
+void XdgSurface::get_popup(wl_client* client, wl_resource*, uint32_t id,
+                           wl_resource* parent_res,
+                           wl_resource* positioner_res) {
+  if (toplevel || popup) {
+    wl_resource_post_error(res, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
+                           "surface already has a role");
+    return;
+  }
+  Surface* parent =
+      parent_res ? user_data<Surface>(parent_res) : nullptr;
+  if (!parent) {
+    wl_resource_post_error(res, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
+                           "popup needs a parent");
+    return;
+  }
+  auto* pos = user_data<Positioner>(positioner_res);
+  popup = bind_resource(client, &xdg_popup_interface,
+                        wl_resource_get_version(res), id,
+                        new XdgPopup(server, this, parent), &popup_impl);
+  server->add_popup(popup);
+
+  int32_t plx = 0, ply = 0;
+  parent->layout_pos(&plx, &ply);
+  Backend::Output* out = server->primary_output();
+  int32_t ow = out ? out->width : 4096, oh = out ? out->height : 4096;
+  pos->resolve(plx, ply, ow, oh, &popup->lx, &popup->ly);
+}
+
+void XdgSurface::committed() {
+  if (!toplevel) return;
+  if (surface->mapped()) {
+    bool listed = std::find(server->toplevels.begin(),
+                            server->toplevels.end(),
+                            toplevel) != server->toplevels.end();
+    if (!toplevel->configure_sent) {
+      toplevel->configure_sent = true;
+      toplevel->activated = true;
+      toplevel->send_configure(0, 0, {XDG_TOPLEVEL_STATE_ACTIVATED});
+    }
+    if (!listed) {
+      server->add_toplevel(toplevel);
+      server->seat->set_keyboard_focus(surface);
+    }
+  } else if (std::find(server->toplevels.begin(), server->toplevels.end(),
+                       toplevel) != server->toplevels.end()) {
+    server->remove_toplevel(toplevel);
+  }
+}
+
+// -------------------------------------------------------------- xdg_toplevel
+
+XdgToplevel::XdgToplevel(Server* srv, XdgSurface* x) : server(srv), xdg(x) {}
+
+XdgToplevel::~XdgToplevel() {
+  server->remove_toplevel(this);
+  if (server->seat->grab_toplevel == this) {
+    server->seat->grab = Seat::Grab::None;
+    server->seat->grab_toplevel = nullptr;
+  }
+  if (xdg) xdg->toplevel = nullptr;
+}
+
 Surface* XdgToplevel::surface() const { return xdg ? xdg->surface : nullptr; }
 
 Rect XdgToplevel::bounds() const {
@@ -193,375 +274,141 @@ Rect XdgToplevel::bounds() const {
   return {x, y, s->width(), s->height()};
 }
 
+std::vector<uint32_t> XdgToplevel::states() const {
+  std::vector<uint32_t> states;
+  if (activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
+  if (maximized) states.push_back(XDG_TOPLEVEL_STATE_MAXIMIZED);
+  if (fullscreen) states.push_back(XDG_TOPLEVEL_STATE_FULLSCREEN);
+  return states;
+}
+
 void XdgToplevel::send_configure(int32_t w, int32_t h,
                                  const std::vector<uint32_t>& states) {
-  wl_array arr;
-  wl_array_init(&arr);
-  for (uint32_t st : states) {
-    uint32_t* p = static_cast<uint32_t*>(wl_array_add(&arr, sizeof(st)));
-    *p = st;
-  }
-  xdg_toplevel_send_configure(res, w, h, &arr);
-  wl_array_release(&arr);
+  WlArray arr;
+  arr.add(states);
+  xdg_toplevel_send_configure(res, w, h, arr.get());
   xdg->pending_serial = wl_display_next_serial(server->display);
   xdg_surface_send_configure(xdg->res, xdg->pending_serial);
 }
 
-static void xdg_surface_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
+void XdgToplevel::set_title(wl_resource*, const char* t) {
+  title = t ? t : "";
+  server->schedule_windows_notify();
 }
 
-static void xdg_surface_get_toplevel(wl_client* client, wl_resource* res,
-                                   uint32_t id) {
-  auto* xs = static_cast<XdgSurface*>(wl_resource_get_user_data(res));
-  if (xs->toplevel || xs->popup) {
-    wl_resource_post_error(res, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
-                           "surface already has a role");
-    return;
+void XdgToplevel::set_app_id(wl_resource*, const char* a) {
+  app_id = a ? a : "";
+  server->schedule_windows_notify();
+}
+
+void XdgToplevel::move(wl_resource*, wl_resource*, uint32_t) {
+  server->seat->begin_move(this);
+}
+
+void XdgToplevel::resize(wl_resource*, wl_resource*, uint32_t,
+                         uint32_t edges) {
+  server->seat->begin_resize(this, edges);
+}
+
+void XdgToplevel::set_maximized(wl_resource*) {
+  if (maximized) return;
+  Backend::Output* out = server->primary_output();
+  if (!out) return;
+  saved_x = x;
+  saved_y = y;
+  x = out->x;
+  y = out->y;
+  maximized = true;
+  send_configure(out->width, out->height, states());
+}
+
+void XdgToplevel::unset_maximized(wl_resource*) {
+  if (!maximized) return;
+  maximized = false;
+  x = saved_x;
+  y = saved_y;
+  send_configure(0, 0, states());
+}
+
+void XdgToplevel::set_fullscreen(wl_resource*, wl_resource*) {
+  if (fullscreen) return;
+  Backend::Output* out = server->primary_output();
+  if (!out) return;
+  if (!maximized) {
+    saved_x = x;
+    saved_y = y;
   }
-  wl_resource* tres = wl_resource_create(client, &xdg_toplevel_interface,
-                                         wl_resource_get_version(res), id);
-  auto* tl = new XdgToplevel();
-  tl->server = xs->server;
-  tl->res = tres;
-  tl->xdg = xs;
-  xs->toplevel = tl;
-  wl_resource_set_implementation(tres, &toplevel_impl, tl, [](wl_resource* r) {
-    auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(r));
-    tl->server->remove_toplevel(tl);
-    if (tl->server->seat->grab_toplevel == tl) {
-      tl->server->seat->grab = Seat::Grab::None;
-      tl->server->seat->grab_toplevel = nullptr;
-    }
-    if (tl->xdg) tl->xdg->toplevel = nullptr;
-    delete tl;
-  });
+  x = out->x;
+  y = out->y;
+  fullscreen = true;
+  send_configure(out->width, out->height, states());
 }
 
-static void xdg_surface_get_popup(wl_client* client, wl_resource* res,
-                                  uint32_t id, wl_resource* parent_res,
-                                  wl_resource* positioner_res) {
-  auto* xs = static_cast<XdgSurface*>(wl_resource_get_user_data(res));
-  if (xs->toplevel || xs->popup) {
-    wl_resource_post_error(res, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
-                           "surface already has a role");
-    return;
-  }
-  Surface* parent = parent_res
-      ? static_cast<Surface*>(wl_resource_get_user_data(parent_res))
-      : nullptr;
-  if (!parent) {
-    wl_resource_post_error(res, XDG_WM_BASE_ERROR_INVALID_POPUP_PARENT,
-                           "popup needs a parent");
-    return;
-  }
-  auto* pos = static_cast<Positioner*>(
-      wl_resource_get_user_data(positioner_res));
-  wl_resource* pres = wl_resource_create(client, &xdg_popup_interface,
-                                         wl_resource_get_version(res), id);
-  auto* pop = new XdgPopup();
-  pop->server = xs->server;
-  pop->res = pres;
-  pop->surface = xs->surface;
-  pop->parent = parent;
-  xs->popup = pop;
-  xs->surface->is_popup = true;
-  server_popup_add(xs->server, pop);
-
-  int32_t plx = 0, ply = 0;
-  surface_layout_pos(parent, &plx, &ply);
-  Backend::Output* out = xs->server->primary_output();
-  int32_t ow = out ? out->width : 4096, oh = out ? out->height : 4096;
-  pos->resolve(plx, ply, ow, oh, &pop->lx, &pop->ly);
-
-  wl_resource_set_implementation(pres, &popup_impl, pop, [](wl_resource* r) {
-    auto* pop = static_cast<XdgPopup*>(wl_resource_get_user_data(r));
-    pop->res = nullptr;  // resource is already dying; never send on it
-    server_popup_remove(pop->server, pop);
-    pop->server->seat->release_popups_from(pop);
-    if (pop->surface && pop->surface->xdg)
-      pop->surface->xdg->popup = nullptr;
-    delete pop;
-  });
+void XdgToplevel::unset_fullscreen(wl_resource*) {
+  if (!fullscreen) return;
+  fullscreen = false;
+  x = saved_x;
+  y = saved_y;
+  send_configure(0, 0, states());
 }
-
-static void xdg_surface_set_window_geometry(wl_client*, wl_resource* res,
-                                            int32_t x, int32_t y, int32_t w,
-                                            int32_t h) {
-  auto* xs = static_cast<XdgSurface*>(wl_resource_get_user_data(res));
-  xs->geometry = {x, y, w, h};
-  xs->has_geometry = true;
-}
-
-static void xdg_surface_ack_configure(wl_client*, wl_resource* res,
-                                      uint32_t serial) {
-  auto* xs = static_cast<XdgSurface*>(wl_resource_get_user_data(res));
-  if (serial == xs->pending_serial) xs->pending_serial = 0;
-}
-
-static const struct xdg_surface_interface xdg_surface_impl = {
-    xdg_surface_destroy,     xdg_surface_get_toplevel,
-    xdg_surface_get_popup,   xdg_surface_set_window_geometry,
-    xdg_surface_ack_configure,
-};
-
-// -------------------------------------------------------------- xdg_toplevel
-
-static void toplevel_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-static void toplevel_set_parent(wl_client*, wl_resource*, wl_resource*) {}
-static void toplevel_set_title(wl_client*, wl_resource* res,
-                               const char* title) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  tl->title = title ? title : "";
-  tl->server->schedule_windows_notify();
-}
-static void toplevel_set_app_id(wl_client*, wl_resource* res,
-                                const char* app_id) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  tl->app_id = app_id ? app_id : "";
-  tl->server->schedule_windows_notify();
-}
-static void toplevel_show_window_menu(wl_client*, wl_resource*, wl_resource*,
-                                      uint32_t, int32_t, int32_t) {}
-static void toplevel_move(wl_client*, wl_resource* res, wl_resource*,
-                          uint32_t) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  tl->server->seat->begin_move(tl);
-}
-static void toplevel_resize(wl_client*, wl_resource* res, wl_resource*,
-                            uint32_t, uint32_t edges) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  tl->server->seat->begin_resize(tl, edges);
-}
-static void toplevel_set_max_size(wl_client*, wl_resource*, int32_t, int32_t) {}
-static void toplevel_set_min_size(wl_client*, wl_resource*, int32_t, int32_t) {}
-static void toplevel_set_maximized(wl_client*, wl_resource* res) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  if (!tl->maximized) {
-    Backend::Output* out = tl->server->primary_output();
-    if (out) {
-      tl->saved_x = tl->x;
-      tl->saved_y = tl->y;
-      tl->x = out->x;
-      tl->y = out->y;
-      tl->maximized = true;
-      std::vector<uint32_t> states = {XDG_TOPLEVEL_STATE_MAXIMIZED};
-      if (tl->activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
-      tl->send_configure(out->width, out->height, states);
-    }
-  }
-}
-static void toplevel_unset_maximized(wl_client*, wl_resource* res) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  if (tl->maximized) {
-    tl->maximized = false;
-    tl->x = tl->saved_x;
-    tl->y = tl->saved_y;
-    std::vector<uint32_t> states;
-    if (tl->activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
-    tl->send_configure(0, 0, states);
-  }
-}
-static void toplevel_set_fullscreen(wl_client*, wl_resource* res,
-                                    wl_resource*) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  if (!tl->fullscreen) {
-    Backend::Output* out = tl->server->primary_output();
-    if (out) {
-      if (!tl->maximized) {
-        tl->saved_x = tl->x;
-        tl->saved_y = tl->y;
-      }
-      tl->x = out->x;
-      tl->y = out->y;
-      tl->fullscreen = true;
-      std::vector<uint32_t> states = {XDG_TOPLEVEL_STATE_FULLSCREEN};
-      if (tl->activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
-      tl->send_configure(out->width, out->height, states);
-    }
-  }
-}
-static void toplevel_unset_fullscreen(wl_client*, wl_resource* res) {
-  auto* tl = static_cast<XdgToplevel*>(wl_resource_get_user_data(res));
-  if (tl->fullscreen) {
-    tl->fullscreen = false;
-    tl->x = tl->saved_x;
-    tl->y = tl->saved_y;
-    std::vector<uint32_t> states;
-    if (tl->activated) states.push_back(XDG_TOPLEVEL_STATE_ACTIVATED);
-    tl->send_configure(0, 0, states);
-  }
-}
-static void toplevel_set_minimized(wl_client*, wl_resource*) {}
-
-const struct xdg_toplevel_interface toplevel_impl = {
-    toplevel_destroy,        toplevel_set_parent,   toplevel_set_title,
-    toplevel_set_app_id,     toplevel_show_window_menu, toplevel_move,
-    toplevel_resize,         toplevel_set_max_size, toplevel_set_min_size,
-    toplevel_set_maximized,  toplevel_unset_maximized,
-    toplevel_set_fullscreen, toplevel_unset_fullscreen,
-    toplevel_set_minimized,
-};
 
 // ----------------------------------------------------------------- xdg_popup
 
-static void popup_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-static void popup_grab(wl_client*, wl_resource* res, wl_resource*,
-                       uint32_t) {
-  auto* pop = static_cast<XdgPopup*>(wl_resource_get_user_data(res));
-  pop->server->seat->popup_grab(pop);
-}
-static void popup_reposition(wl_client*, wl_resource* res,
-                             wl_resource* positioner_res, uint32_t) {
-  auto* pop = static_cast<XdgPopup*>(wl_resource_get_user_data(res));
-  auto* pos = static_cast<Positioner*>(
-      wl_resource_get_user_data(positioner_res));
-  int32_t plx = 0, ply = 0;
-  surface_layout_pos(pop->parent, &plx, &ply);
-  Backend::Output* out = pop->server->primary_output();
-  int32_t ow = out ? out->width : 4096, oh = out ? out->height : 4096;
-  pos->resolve(plx, ply, ow, oh, &pop->lx, &pop->ly);
-  xdg_popup_send_repositioned(pop->res, 0);
-  pop->server->mark_dirty();
+XdgPopup::XdgPopup(Server* srv, XdgSurface* x, Surface* p)
+    : server(srv), xdg(x), surface(x->surface), parent(p) {}
+
+XdgPopup::~XdgPopup() {
+  res = nullptr;  // resource is already dying; never send on it
+  server->remove_popup(this);
+  server->seat->release_popups_from(this);
+  if (xdg) xdg->popup = nullptr;
 }
 
-const struct xdg_popup_interface popup_impl = {
-    popup_destroy, popup_grab, popup_reposition,
-};
+void XdgPopup::grab(wl_resource*, wl_resource*, uint32_t) {
+  server->seat->popup_grab(this);
+}
+
+void XdgPopup::reposition(wl_resource*, wl_resource* positioner_res,
+                          uint32_t) {
+  auto* pos = user_data<Positioner>(positioner_res);
+  int32_t plx = 0, ply = 0;
+  parent->layout_pos(&plx, &ply);
+  Backend::Output* out = server->primary_output();
+  int32_t ow = out ? out->width : 4096, oh = out ? out->height : 4096;
+  pos->resolve(plx, ply, ow, oh, &lx, &ly);
+  xdg_popup_send_repositioned(res, 0);
+  server->mark_dirty();
+}
 
 // ---------------------------------------------------------------- xdg_wm_base
 
-static void wm_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
+XdgShell::XdgShell(Server* s) : server(s) {
+  global_.create(s->display, &xdg_wm_base_interface, 3,
+                 [this](wl_client* c, uint32_t v, uint32_t id) {
+                   wl_resource* res = wl_resource_create(
+                       c, &xdg_wm_base_interface, v, id);
+                   wl_resource_set_implementation(res, &wm_impl, this,
+                                                  nullptr);
+                 });
 }
 
-static void wm_create_positioner(wl_client* client, wl_resource* res,
+void XdgShell::create_positioner(wl_client* client, wl_resource* res,
                                  uint32_t id) {
-  wl_resource* pres =
-      wl_resource_create(client, &xdg_positioner_interface,
-                         wl_resource_get_version(res), id);
-  wl_resource_set_implementation(pres, &positioner_impl, new Positioner(),
-                                 [](wl_resource* r) {
-                                   delete static_cast<Positioner*>(
-                                       wl_resource_get_user_data(r));
-                                 });
+  bind_resource(client, &xdg_positioner_interface,
+                wl_resource_get_version(res), id, new Positioner(),
+                &positioner_impl);
 }
 
-static void wm_get_xdg_surface(wl_client* client, wl_resource* res,
+void XdgShell::get_xdg_surface(wl_client* client, wl_resource* res,
                                uint32_t id, wl_resource* surface_res) {
-  auto* server = static_cast<Server*>(wl_resource_get_user_data(res));
-  auto* surface =
-      static_cast<Surface*>(wl_resource_get_user_data(surface_res));
+  Surface* surface = user_data<Surface>(surface_res);
   if (surface->xdg) {
     wl_resource_post_error(res, XDG_WM_BASE_ERROR_ROLE,
                            "surface already has a role");
     return;
   }
-  wl_resource* xres = wl_resource_create(client, &xdg_surface_interface,
-                                         wl_resource_get_version(res), id);
-  auto* xs = new XdgSurface();
-  xs->server = server;
-  xs->res = xres;
-  xs->surface = surface;
-  surface->xdg = xs;
-  wl_resource_set_implementation(xres, &xdg_surface_impl, xs,
-                                 [](wl_resource* r) {
-                                   auto* xs = static_cast<XdgSurface*>(
-                                       wl_resource_get_user_data(r));
-                                   if (xs->surface) xs->surface->xdg = nullptr;
-                                   delete xs;
-                                 });
-}
-
-static void wm_pong(wl_client*, wl_resource*, uint32_t) {}
-
-static const struct xdg_wm_base_interface wm_impl = {
-    wm_destroy, wm_create_positioner, wm_get_xdg_surface, wm_pong,
-};
-
-static void wm_bind(wl_client* client, void* data, uint32_t version,
-                    uint32_t id) {
-  wl_resource* res =
-      wl_resource_create(client, &xdg_wm_base_interface, version, id);
-  wl_resource_set_implementation(res, &wm_impl, data, nullptr);
-}
-
-void xdg_global_init(Server* server) {
-  wl_global_create(server->display, &xdg_wm_base_interface, 3, server,
-                   wm_bind);
-}
-
-// ------------------------------------------------------- map/unmap handling
-
-void xdg_surface_committed(Surface* s) {
-  XdgSurface* xs = s->xdg;
-  if (!xs) return;
-  Server* server = xs->server;
-
-  if (xs->toplevel) {
-    XdgToplevel* tl = xs->toplevel;
-    if (s->mapped()) {
-      bool listed =
-          std::find(server->toplevels.begin(), server->toplevels.end(), tl) !=
-          server->toplevels.end();
-      if (!tl->configure_sent) {
-        tl->configure_sent = true;
-        std::vector<uint32_t> states = {XDG_TOPLEVEL_STATE_ACTIVATED};
-        tl->activated = true;
-        tl->send_configure(0, 0, states);
-      }
-      if (!listed) {
-        server->add_toplevel(tl);
-        server->seat->set_keyboard_focus(s);
-      }
-    } else if (std::find(server->toplevels.begin(), server->toplevels.end(),
-                         tl) != server->toplevels.end()) {
-      server->remove_toplevel(tl);
-    }
-  }
-}
-
-// ------------------------------------------------------ server popup hooks
-
-void server_popup_add(Server* server, XdgPopup* pop) {
-  server->popups.push_back(pop);
-}
-void server_popup_remove(Server* server, XdgPopup* pop) {
-  auto& v = server->popups;
-  v.erase(std::remove(v.begin(), v.end(), pop), v.end());
-}
-
-void surface_layout_pos(Surface* s, int32_t* lx, int32_t* ly) {
-  int32_t x = 0, y = 0;
-  while (s) {
-    if (s->xdg && s->xdg->toplevel) {
-      x += s->xdg->toplevel->x;
-      y += s->xdg->toplevel->y;
-      break;
-    }
-    bool popup_found = false;
-    for (XdgPopup* p : s->server->popups)
-      if (p->surface == s) {
-        x += p->lx;
-        y += p->ly;
-        popup_found = true;
-        break;
-      }
-    if (popup_found) break;
-    if (s->parent) {
-      x += s->sub_x;
-      y += s->sub_y;
-      s = s->parent;
-    } else {
-      break;
-    }
-  }
-  *lx = x;
-  *ly = y;
+  bind_resource(client, &xdg_surface_interface, wl_resource_get_version(res),
+                id, new XdgSurface(server, surface), &xdg_surface_impl);
 }
 
 }  // namespace oasis

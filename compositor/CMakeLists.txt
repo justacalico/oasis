@@ -54,6 +54,7 @@ add_executable(oasis-comp
   src/main.cc
   src/server.cc
   src/util.cc
+  src/wl.cc
   src/json.cc
   src/renderer.cc
   src/surface.cc

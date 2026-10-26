@@ -1,27 +1,20 @@
-#include <unistd.h>
-#include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
-#include "log.h"
 #include "flutter.h"
+#include "log.h"
 #include "server.h"
+#include "util.h"
 
 using namespace oasis;
 
-static bool dir_exists(const std::string& p) {
-  struct stat st;
-  return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
-
 static std::string exe_dir() {
-  char buf[4096];
-  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-  if (n <= 0) return ".";
-  buf[n] = 0;
-  std::string p(buf);
-  return p.substr(0, p.rfind('/'));
+  std::error_code ec;
+  auto p = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec) return ".";
+  return p.parent_path().string();
 }
 
 int main(int argc, char** argv) {
@@ -33,7 +26,8 @@ int main(int argc, char** argv) {
       cfg.force_drm = true;
     } else if (a == "--nested") {
       cfg.force_drm = false;
-      setenv("OASIS_HOST_DISPLAY", getenv("WAYLAND_DISPLAY") ?: "", 1);
+      const char* host = getenv("WAYLAND_DISPLAY");
+      setenv("OASIS_HOST_DISPLAY", host ? host : "", 1);
     } else if (a == "--bundle" && i + 1 < argc) {
       cfg.bundle_dir = argv[++i];
     } else if (a == "--engine-dir" && i + 1 < argc) {
@@ -83,6 +77,5 @@ int main(int argc, char** argv) {
     return 1;
   }
   server.run();
-  if (server.flutter) server.flutter->shutdown();
   return 0;
 }

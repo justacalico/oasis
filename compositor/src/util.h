@@ -24,6 +24,9 @@ struct Region {
   std::vector<Rect> rects;
   bool infinite = false;
 
+  void add(const Rect& r) { rects.push_back(r); }
+  void subtract(const Rect& hole);
+
   bool contains(double x, double y) const {
     if (infinite) return true;
     for (const auto& r : rects)
@@ -49,5 +52,8 @@ uint64_t now_usec();
 int memfd_create_cloexec(const char* name);
 bool write_all(int fd, const void* data, size_t size);
 std::string read_fd_to_string(int fd);
+bool file_exists(const std::string& path);
+bool dir_exists(const std::string& path);
+std::vector<uint8_t> read_file(const std::string& path);
 
 }  // namespace oasis

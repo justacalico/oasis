@@ -3,156 +3,16 @@
 #include <algorithm>
 #include <cstring>
 #include "log.h"
-#include "server.h"
+#include "protocols.h"
 #include "seat.h"
+#include "server.h"
 #include "xdg.h"
 
 namespace oasis {
 
-// ---------------------------------------------------------------- wl_region
-
-static void region_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-
-static void region_add(wl_client*, wl_resource* res, int32_t x, int32_t y,
-                       int32_t w, int32_t h) {
-  auto* r = static_cast<Region*>(wl_resource_get_user_data(res));
-  r->rects.push_back({x, y, w, h});
-}
-
-static void region_subtract(wl_client*, wl_resource* res, int32_t x, int32_t y,
-                            int32_t w, int32_t h) {
-  auto* r = static_cast<Region*>(wl_resource_get_user_data(res));
-  Rect hole{x, y, w, h};
-  std::vector<Rect> out;
-  for (const Rect& q : r->rects) {
-    if (q.x >= hole.x + hole.w || q.x + q.w <= hole.x ||
-        q.y >= hole.y + hole.h || q.y + q.h <= hole.y) {
-      out.push_back(q);
-      continue;
-    }
-    if (q.y < hole.y) out.push_back({q.x, q.y, q.w, hole.y - q.y});
-    if (q.y + q.h > hole.y + hole.h)
-      out.push_back({q.x, hole.y + hole.h, q.w,
-                     q.y + q.h - (hole.y + hole.h)});
-    if (q.x < hole.x)
-      out.push_back(
-          {q.x, std::max(q.y, hole.y), hole.x - q.x,
-           std::min(q.y + q.h, hole.y + hole.h) - std::max(q.y, hole.y)});
-    if (q.x + q.w > hole.x + hole.w)
-      out.push_back({hole.x + hole.w, std::max(q.y, hole.y),
-                     q.x + q.w - (hole.x + hole.w),
-                     std::min(q.y + q.h, hole.y + hole.h) -
-                         std::max(q.y, hole.y)});
-  }
-  r->rects = std::move(out);
-}
-
-static const struct wl_region_interface region_impl = {
-    region_destroy, region_add, region_subtract,
-};
-
-static void region_resource_destroy(wl_resource* res) {
-  delete static_cast<Region*>(wl_resource_get_user_data(res));
-}
-
-// --------------------------------------------------------------- wl_surface
-
-static void surface_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-
-static void surface_attach(wl_client*, wl_resource* res,
-                           wl_resource* buffer_res, int32_t dx, int32_t dy) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->pending.has_buffer = true;
-  s->pending.buffer_res = buffer_res;
-  s->pending.dx = dx;
-  s->pending.dy = dy;
-}
-
-static void surface_damage(wl_client*, wl_resource*, int32_t, int32_t, int32_t,
-                           int32_t) {}
-
-static void surface_damage_buffer(wl_client*, wl_resource*, int32_t, int32_t,
-                                  int32_t, int32_t) {}
-
-static void surface_frame(wl_client*, wl_resource* res, uint32_t cb_id) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  wl_resource* cb = wl_resource_create(wl_resource_get_client(res),
-                                       &wl_callback_interface, 1, cb_id);
-  s->pending.cbs.push_back(cb);
-}
-
-static void surface_set_opaque_region(wl_client*, wl_resource*, wl_resource*) {}
-
-static void surface_set_input_region(wl_client*, wl_resource* res,
-                                     wl_resource* region_res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->pending.has_input = true;
-  if (region_res) {
-    s->pending.input = *static_cast<Region*>(
-        wl_resource_get_user_data(region_res));
-    s->pending.input.infinite = false;
-  } else {
-    s->pending.input = {};
-    s->pending.input.infinite = true;
-  }
-}
-
-static void surface_commit(wl_client*, wl_resource* res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->commit();
-}
-
-static void surface_set_buffer_transform(wl_client*, wl_resource* res,
-                                         int32_t transform) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  if (transform < 0 || transform > 7) {
-    wl_resource_post_error(res, WL_SURFACE_ERROR_INVALID_TRANSFORM,
-                           "invalid transform %d", transform);
-    return;
-  }
-  s->pending.transform = transform;
-}
-
-static void surface_set_buffer_scale(wl_client*, wl_resource* res,
-                                     int32_t scale) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  if (scale <= 0) {
-    wl_resource_post_error(res, WL_SURFACE_ERROR_INVALID_SCALE,
-                           "invalid scale %d", scale);
-    return;
-  }
-  s->pending.scale = scale;
-}
-
-static void surface_offset(wl_client*, wl_resource* res, int32_t dx,
-                           int32_t dy) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  if (s->pending.has_buffer) {
-    s->pending.dx = dx;
-    s->pending.dy = dy;
-  }
-}
-
-static const struct wl_surface_interface surface_impl = {
-    surface_destroy,           surface_attach,
-    surface_damage,            surface_frame,
-    surface_set_opaque_region, surface_set_input_region,
-    surface_commit,            surface_set_buffer_transform,
-    surface_set_buffer_scale,  surface_damage_buffer,
-    surface_offset,
-};
-
 // ------------------------------------------------------------------ Surface
 
-// Implemented in shm.cc / dmabuf.cc: wraps a wl_buffer resource as a Buffer.
-Buffer* buffer_from_resource(wl_resource* res);
-void buffer_take(Surface* s, wl_resource* res);
-
-Surface::Surface(Server* srv, wl_resource* r) : server(srv), res(r) {
+Surface::Surface(Server* srv) : server(srv) {
   input_region.infinite = true;
   pending.scale = 1;
   pending.transform = WL_OUTPUT_TRANSFORM_NORMAL;
@@ -162,33 +22,29 @@ Surface::~Surface() {
   for (wl_resource* cb : frame_callbacks) wl_resource_destroy(cb);
   for (wl_resource* cb : pending.cbs) wl_resource_destroy(cb);
   for (wl_resource* cb : cached.cbs) wl_resource_destroy(cb);
-  auto& v = server->surfaces;
-  v.erase(std::remove(v.begin(), v.end(), this), v.end());
-}
-
-static void surface_resource_destroy(wl_resource* res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  Server* server = s->server;
-  if (server->cursor_surface == s) server->cursor_surface = nullptr;
-  if (server->seat->pointer_focus == s) server->seat->pointer_focus = nullptr;
-  if (server->seat->keyboard_focus == s)
+  if (server->cursor_surface == this) server->cursor_surface = nullptr;
+  if (server->seat->pointer_focus == this)
+    server->seat->pointer_focus = nullptr;
+  if (server->seat->keyboard_focus == this)
     server->seat->keyboard_focus = nullptr;
-  if (s->xdg) {
-    if (s->xdg->toplevel) server->remove_toplevel(s->xdg->toplevel);
-    s->xdg->surface = nullptr;
-    s->xdg = nullptr;
+  if (xdg) {
+    if (xdg->toplevel) server->remove_toplevel(xdg->toplevel);
+    xdg->surface = nullptr;
+    xdg = nullptr;
   }
   for (XdgPopup* p : server->popups)
-    if (p->parent == s) p->parent = nullptr;
-  if (server->drag_target_surface == s) server->drag_target_surface = nullptr;
-  if (s->parent) {
-    auto& sib = s->parent->children;
-    sib.erase(std::remove(sib.begin(), sib.end(), s), sib.end());
+    if (p->parent == this) p->parent = nullptr;
+  server->data_manager->clear_drag_target(this);
+  if (subsurface) wl_resource_destroy(subsurface->res);
+  if (parent) {
+    auto& sib = parent->children;
+    sib.erase(std::remove(sib.begin(), sib.end(), this), sib.end());
   }
-  for (Surface* c : s->children) c->parent = nullptr;
+  for (Surface* c : children) c->parent = nullptr;
+  auto& v = server->surfaces;
+  v.erase(std::remove(v.begin(), v.end(), this), v.end());
   server->mark_dirty();
   server->schedule_windows_notify();
-  delete s;
 }
 
 int32_t Surface::width() const {
@@ -209,6 +65,16 @@ int32_t Surface::height() const {
   return h / buffer_scale;
 }
 
+void Surface::take_buffer(wl_resource* buffer_res) {
+  auto* buf = Buffer::from(buffer_res);
+  if (!buf) {
+    wl_resource_post_error(res, 0 /*invalid buffer*/, "unknown buffer");
+    return;
+  }
+  buf->taken = true;
+  buffer.reset(buf);
+}
+
 void Surface::apply_pending(Pending& p) {
   if (p.has_buffer) {
     if (p.buffer_res == nullptr) {
@@ -217,10 +83,9 @@ void Surface::apply_pending(Pending& p) {
       // re-attach of the same buffer, nothing to do
     } else {
       destroy_buffer();
-      buffer_take(this, p.buffer_res);
+      take_buffer(p.buffer_res);
       if (!buffer) {
-        wl_resource_post_error(res, 0 /*invalid buffer*/,
-                               "unusable buffer");
+        wl_resource_post_error(res, 0 /*invalid buffer*/, "unusable buffer");
       }
     }
     buf_dx = p.dx;
@@ -258,8 +123,6 @@ void Surface::destroy_buffer() {
   buffer.reset();
 }
 
-void xdg_surface_committed(Surface* s);  // xdg.cc
-
 void Surface::commit() {
   if (parent && sync) {
     cached = pending;
@@ -284,7 +147,7 @@ void Surface::commit() {
           g->has_cached = false;
         }
     }
-  if (xdg) xdg_surface_committed(this);
+  if (xdg) xdg->committed();
 }
 
 void Surface::send_frame_done(uint32_t ms) {
@@ -310,157 +173,229 @@ bool Surface::hit(double x, double y, double* sx, double* sy) {
   return true;
 }
 
-// ------------------------------------------------------------ wl_compositor
-
-static void compositor_create_surface(wl_client* client, wl_resource* res,
-                                      uint32_t id) {
-  auto* server = static_cast<Server*>(wl_resource_get_user_data(res));
-  wl_resource* sres =
-      wl_resource_create(client, &wl_surface_interface,
-                         wl_resource_get_version(res), id);
-  auto* s = new Surface(server, sres);
-  server->surfaces.push_back(s);
-  wl_resource_set_implementation(sres, &surface_impl, s,
-                                 surface_resource_destroy);
+void Surface::layout_pos(int32_t* lx, int32_t* ly) {
+  int32_t x = 0, y = 0;
+  Surface* s = this;
+  while (s) {
+    if (s->xdg && s->xdg->toplevel) {
+      x += s->xdg->toplevel->x;
+      y += s->xdg->toplevel->y;
+      break;
+    }
+    bool popup_found = false;
+    for (XdgPopup* p : s->server->popups)
+      if (p->surface == s) {
+        x += p->lx;
+        y += p->ly;
+        popup_found = true;
+        break;
+      }
+    if (popup_found) break;
+    if (s->parent) {
+      x += s->sub_x;
+      y += s->sub_y;
+      s = s->parent;
+    } else {
+      break;
+    }
+  }
+  *lx = x;
+  *ly = y;
 }
 
-static void compositor_create_region(wl_client* client, wl_resource*,
-                                     uint32_t id) {
-  wl_resource* rres = wl_resource_create(client, &wl_region_interface, 1, id);
-  wl_resource_set_implementation(rres, &region_impl, new Region(),
-                                 region_resource_destroy);
+// wl_surface requests
+
+void Surface::attach(wl_resource*, wl_resource* buffer_res, int32_t dx,
+                     int32_t dy) {
+  pending.has_buffer = true;
+  pending.buffer_res = buffer_res;
+  pending.dx = dx;
+  pending.dy = dy;
 }
 
-static const struct wl_compositor_interface compositor_impl = {
-    compositor_create_surface, compositor_create_region,
+void Surface::frame(wl_resource*, uint32_t cb_id) {
+  wl_resource* cb = wl_resource_create(wl_resource_get_client(res),
+                                     &wl_callback_interface, 1, cb_id);
+  pending.cbs.push_back(cb);
+}
+
+void Surface::set_input_region(wl_resource*, wl_resource* region_res) {
+  pending.has_input = true;
+  if (region_res) {
+    pending.input = user_data<WlRegion>(region_res)->region;
+    pending.input.infinite = false;
+  } else {
+    pending.input = {};
+    pending.input.infinite = true;
+  }
+}
+
+void Surface::set_buffer_transform(wl_resource*, int32_t transform) {
+  if (transform < 0 || transform > 7) {
+    wl_resource_post_error(res, WL_SURFACE_ERROR_INVALID_TRANSFORM,
+                           "invalid transform %d", transform);
+    return;
+  }
+  pending.transform = transform;
+}
+
+void Surface::set_buffer_scale(wl_resource*, int32_t scale) {
+  if (scale <= 0) {
+    wl_resource_post_error(res, WL_SURFACE_ERROR_INVALID_SCALE,
+                           "invalid scale %d", scale);
+    return;
+  }
+  pending.scale = scale;
+}
+
+void Surface::offset(wl_resource*, int32_t dx, int32_t dy) {
+  if (pending.has_buffer) {
+    pending.dx = dx;
+    pending.dy = dy;
+  }
+}
+
+static const struct wl_surface_interface surface_impl = {
+    destroy_request,
+    REQ(Surface, attach),
+    REQ(Surface, damage),
+    REQ(Surface, frame),
+    REQ(Surface, set_opaque_region),
+    REQ(Surface, set_input_region),
+    REQ(Surface, commit_request),
+    REQ(Surface, set_buffer_transform),
+    REQ(Surface, set_buffer_scale),
+    REQ(Surface, damage_buffer),
+    REQ(Surface, offset),
 };
 
-static void compositor_bind(wl_client* client, void* data, uint32_t version,
-                            uint32_t id) {
-  wl_resource* res =
-      wl_resource_create(client, &wl_compositor_interface, version, id);
-  wl_resource_set_implementation(res, &compositor_impl, data, nullptr);
+// ------------------------------------------------------------------ wl_region
+
+static const struct wl_region_interface region_impl = {
+    destroy_request, REQ(WlRegion, add), REQ(WlRegion, subtract),
+};
+
+// --------------------------------------------------------------- Subsurface
+
+Subsurface::Subsurface(Server* server, Surface* s, Surface* p)
+    : surface(s), server_(server), parent_(p) {
+  s->subsurface = this;
+  s->parent = p;
+  s->sync = true;  // subsurfaces start in sync mode
+  p->children.push_back(s);
 }
 
-void compositor_global_init(Server* server) {
-  wl_global_create(server->display, &wl_compositor_interface, 5, server,
-                   compositor_bind);
+Subsurface::~Subsurface() {
+  surface->subsurface = nullptr;
+  if (surface->parent) {
+    auto& sib = surface->parent->children;
+    sib.erase(std::remove(sib.begin(), sib.end(), surface), sib.end());
+    surface->parent = nullptr;
+    server_->mark_dirty();
+  }
+}
+
+void Subsurface::set_position(wl_resource*, int32_t x, int32_t y) {
+  surface->sub_x = x;
+  surface->sub_y = y;
+  server_->mark_dirty();
+}
+
+void Subsurface::place_above(wl_resource*, wl_resource* sibling_res) {
+  Surface* sibling = user_data<Surface>(sibling_res);
+  if (sibling->parent != parent_) return;
+  auto& kids = parent_->children;
+  kids.erase(std::remove(kids.begin(), kids.end(), surface), kids.end());
+  auto it = std::find(kids.begin(), kids.end(), sibling);
+  kids.insert(it + 1, surface);
+  server_->mark_dirty();
+}
+
+void Subsurface::place_below(wl_resource*, wl_resource* sibling_res) {
+  Surface* sibling = user_data<Surface>(sibling_res);
+  if (sibling->parent != parent_) return;
+  auto& kids = parent_->children;
+  kids.erase(std::remove(kids.begin(), kids.end(), surface), kids.end());
+  auto it = std::find(kids.begin(), kids.end(), sibling);
+  kids.insert(it, surface);
+  server_->mark_dirty();
+}
+
+void Subsurface::set_sync(wl_resource*) { surface->sync = true; }
+void Subsurface::set_desync(wl_resource*) { surface->sync = false; }
+
+static const struct wl_subsurface_interface subsurface_impl = {
+    destroy_request,
+    REQ(Subsurface, set_position),
+    REQ(Subsurface, place_above),
+    REQ(Subsurface, place_below),
+    REQ(Subsurface, set_sync),
+    REQ(Subsurface, set_desync),
+};
+
+// ------------------------------------------------------------ wl_compositor
+
+static const struct wl_compositor_interface compositor_impl = {
+    REQ(Compositor, create_surface), REQ(Compositor, create_region),
+};
+
+Compositor::Compositor(Server* s) : server(s) {
+  global_.create(s->display, &wl_compositor_interface, 5,
+                 [this](wl_client* c, uint32_t v, uint32_t id) {
+                   wl_resource* res = wl_resource_create(
+                       c, &wl_compositor_interface, v, id);
+                   wl_resource_set_implementation(res, &compositor_impl, this,
+                                                  nullptr);
+                 });
+}
+
+void Compositor::create_surface(wl_client* client, wl_resource* res,
+                                uint32_t id) {
+  auto* s = bind_resource(client, &wl_surface_interface,
+                          wl_resource_get_version(res), id, new Surface(server),
+                          &surface_impl);
+  server->surfaces.push_back(s);
+}
+
+void Compositor::create_region(wl_client* client, wl_resource*,
+                               uint32_t id) {
+  bind_resource(client, &wl_region_interface, 1, id, new WlRegion(),
+                &region_impl);
 }
 
 // ---------------------------------------------------------- wl_subcompositor
 
-static void subsurface_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
-}
-
-static void subsurface_set_position(wl_client*, wl_resource* res, int32_t x,
-                                    int32_t y) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->sub_x = x;
-  s->sub_y = y;
-  s->server->mark_dirty();
-}
-
-static void subsurface_place_above(wl_client*, wl_resource* res,
-                                   wl_resource* sibling_res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  auto* sibling =
-      static_cast<Surface*>(wl_resource_get_user_data(sibling_res));
-  if (!s->parent || sibling->parent != s->parent) return;
-  auto& kids = s->parent->children;
-  kids.erase(std::remove(kids.begin(), kids.end(), s), kids.end());
-  auto it = std::find(kids.begin(), kids.end(), sibling);
-  kids.insert(it + 1, s);
-  s->server->mark_dirty();
-}
-
-static void subsurface_place_below(wl_client*, wl_resource* res,
-                                   wl_resource* sibling_res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  auto* sibling =
-      static_cast<Surface*>(wl_resource_get_user_data(sibling_res));
-  if (!s->parent || sibling->parent != s->parent) return;
-  auto& kids = s->parent->children;
-  kids.erase(std::remove(kids.begin(), kids.end(), s), kids.end());
-  auto it = std::find(kids.begin(), kids.end(), sibling);
-  kids.insert(it, s);
-  s->server->mark_dirty();
-}
-
-static void subsurface_set_sync(wl_client*, wl_resource* res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->sync = true;
-}
-
-static void subsurface_set_desync(wl_client*, wl_resource* res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(res));
-  s->sync = false;
-}
-
-static const struct wl_subsurface_interface subsurface_impl = {
-    subsurface_destroy,     subsurface_set_position,
-    subsurface_place_above, subsurface_place_below,
-    subsurface_set_sync,    subsurface_set_desync,
+static const struct wl_subcompositor_interface subcompositor_impl = {
+    destroy_request, REQ(Subcompositor, get_subsurface),
 };
 
-static void subcompositor_destroy(wl_client*, wl_resource* res) {
-  wl_resource_destroy(res);
+Subcompositor::Subcompositor(Server* s) : server(s) {
+  global_.create(s->display, &wl_subcompositor_interface, 1,
+                 [this](wl_client* c, uint32_t v, uint32_t id) {
+                   wl_resource* res = wl_resource_create(
+                       c, &wl_subcompositor_interface, v, id);
+                   wl_resource_set_implementation(res, &subcompositor_impl,
+                                                  this, nullptr);
+                 });
 }
 
-static void subcompositor_get_subsurface(wl_client* client, wl_resource* res,
-                                         uint32_t id,
-                                         wl_resource* surface_res,
-                                         wl_resource* parent_res) {
-  auto* s = static_cast<Surface*>(wl_resource_get_user_data(surface_res));
-  auto* parent =
-      static_cast<Surface*>(wl_resource_get_user_data(parent_res));
+void Subcompositor::get_subsurface(wl_client* client, wl_resource* res,
+                                   uint32_t id, wl_resource* surface_res,
+                                   wl_resource* parent_res) {
+  Surface* s = user_data<Surface>(surface_res);
+  Surface* parent = user_data<Surface>(parent_res);
   if (s == parent) {
     wl_resource_post_error(res, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
                            "surface cannot be its own parent");
     return;
   }
-  if (s->parent) {
+  if (s->subsurface) {
     wl_resource_post_error(res, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
                            "surface already has a parent");
     return;
   }
-  wl_resource* sres =
-      wl_resource_create(client, &wl_subsurface_interface,
-                         wl_resource_get_version(res), id);
-  s->subsurface_res = sres;
-  s->parent = parent;
-  s->sync = true;  // subsurfaces start in sync mode
-  parent->children.push_back(s);
-  wl_resource_set_implementation(sres, &subsurface_impl, s,
-                                 [](wl_resource* r) {
-                                   auto* s = static_cast<Surface*>(
-                                       wl_resource_get_user_data(r));
-                                   s->subsurface_res = nullptr;
-                                   if (s->parent) {
-                                     auto& sib = s->parent->children;
-                                     sib.erase(std::remove(sib.begin(),
-                                                           sib.end(), s),
-                                               sib.end());
-                                     s->parent = nullptr;
-                                     s->server->mark_dirty();
-                                   }
-                                 });
-}
-
-static const struct wl_subcompositor_interface subcompositor_impl = {
-    subcompositor_destroy, subcompositor_get_subsurface,
-};
-
-static void subcompositor_bind(wl_client* client, void*, uint32_t version,
-                               uint32_t id) {
-  wl_resource* res =
-      wl_resource_create(client, &wl_subcompositor_interface, version, id);
-  wl_resource_set_implementation(res, &subcompositor_impl, nullptr, nullptr);
-}
-
-void subcompositor_global_init(Server* server) {
-  wl_global_create(server->display, &wl_subcompositor_interface, 1, nullptr,
-                   subcompositor_bind);
+  bind_resource(client, &wl_subsurface_interface, wl_resource_get_version(res),
+                id, new Subsurface(server, s, parent), &subsurface_impl);
 }
 
 }  // namespace oasis

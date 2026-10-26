@@ -19,31 +19,10 @@
 #include "server.h"
 #include "surface.h"
 #include "util.h"
+#include "wl.h"
 #include "xdg.h"
 
 namespace oasis {
-
-static bool file_exists(const std::string& p) {
-  struct stat st;
-  return stat(p.c_str(), &st) == 0;
-}
-
-static const uint8_t* map_file(const std::string& p, size_t* size) {
-  int fd = open(p.c_str(), O_RDONLY);
-  if (fd < 0) return nullptr;
-  struct stat st;
-  fstat(fd, &st);
-  void* m = mmap(nullptr, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  if (m == MAP_FAILED) return nullptr;
-  *size = st.st_size;
-  return static_cast<const uint8_t*>(m);
-}
-
-struct TaskCtx {
-  FlutterHost* host;
-  FlutterTask task;
-};
 
 // ------------------------------------------------------- GL bridge methods
 
@@ -225,7 +204,6 @@ void FlutterHost::pointer(int phase, double x, double y, int64_t buttons,
 void FlutterHost::key(uint32_t evdev, bool press, xkb_state* state,
                       xkb_keycode_t kc, uint64_t t_us) {
   if (!engine_ || !state) return;
-  static std::set<uint32_t> pressed;
   xkb_keysym_t sym = xkb_state_key_get_one_sym(state, kc);
   uint32_t utf32 = press ? xkb_state_key_get_utf32(state, kc) : 0;
   uint64_t physical = hid_to_physical(evdev_to_hid(evdev));
@@ -238,7 +216,7 @@ void FlutterHost::key(uint32_t evdev, bool press, xkb_state* state,
   FlutterKeyEvent ev = {};
   ev.struct_size = sizeof(ev);
   ev.timestamp = t_us;
-  bool already = pressed.count(evdev) != 0;
+  bool already = pressed_keys_.count(evdev) != 0;
   ev.type = press ? (already ? kFlutterKeyEventTypeRepeat
                              : kFlutterKeyEventTypeDown)
                   : kFlutterKeyEventTypeUp;
@@ -249,9 +227,9 @@ void FlutterHost::key(uint32_t evdev, bool press, xkb_state* state,
   ev.device_type = kFlutterKeyEventDeviceTypeKeyboard;
   api_.SendKeyEvent(engine_, &ev, nullptr, nullptr);
   if (press)
-    pressed.insert(evdev);
+    pressed_keys_.insert(evdev);
   else
-    pressed.erase(evdev);
+    pressed_keys_.erase(evdev);
 }
 
 // -------------------------------------------------------------- task runner
@@ -259,19 +237,8 @@ void FlutterHost::key(uint32_t evdev, bool press, xkb_state* state,
 void FlutterHost::post_task(FlutterTask task, uint64_t target) {
   uint64_t now = api_.GetCurrentTime();
   int ms = target > now ? (int)((target - now) / 1000000ULL) : 0;
-  auto* ctx = new TaskCtx{this, task};
-  wl_event_source* src = wl_event_loop_add_timer(
-      loop_,
-      [](void* data) -> int {
-        auto* ctx = static_cast<TaskCtx*>(data);
-        FlutterHost* h = ctx->host;
-        FlutterTask t = ctx->task;
-        delete ctx;
-        h->api_.RunTask(h->engine_, &t);
-        return 0;
-      },
-      ctx);
-  wl_event_source_timer_update(src, ms);
+  EventSource::defer(loop_, ms,
+                     [this, task] { api_.RunTask(engine_, &task); });
 }
 
 // -------------------------------------------------------------------- init
@@ -298,7 +265,7 @@ bool FlutterHost::init(Server* server, const char* bundle_dir,
     return false;
   }
 
-  Backend* backend = server->backend;
+  Backend* backend = server->backend.get();
   dpy_ = backend->egl_display();
   rctx_ = backend->new_context();
   resctx_ = backend->new_context();
@@ -330,22 +297,20 @@ bool FlutterHost::init(Server* server, const char* bundle_dir,
   };
 
   main_tid_ = (pid_t)syscall(SYS_gettid);
-  static FlutterTaskRunnerDescription platform_runner;
-  platform_runner.struct_size = sizeof(platform_runner);
-  platform_runner.user_data = this;
-  platform_runner.runs_task_on_current_thread_callback = [](void* ud) {
+  platform_runner_.struct_size = sizeof(platform_runner_);
+  platform_runner_.user_data = this;
+  platform_runner_.runs_task_on_current_thread_callback = [](void* ud) {
     auto* h = static_cast<FlutterHost*>(ud);
     return (pid_t)syscall(SYS_gettid) == h->main_tid_;
   };
-  platform_runner.post_task_callback = [](FlutterTask task, uint64_t target,
-                                          void* ud) {
+  platform_runner_.post_task_callback = [](FlutterTask task, uint64_t target,
+                                           void* ud) {
     static_cast<FlutterHost*>(ud)->post_task(task, target);
   };
-  platform_runner.identifier = 1;
-  static FlutterCustomTaskRunners runners = {};
-  runners.struct_size = sizeof(runners);
-  runners.platform_task_runner = &platform_runner;
-  args.custom_task_runners = &runners;
+  platform_runner_.identifier = 1;
+  runners_.struct_size = sizeof(runners_);
+  runners_.platform_task_runner = &platform_runner_;
+  args.custom_task_runners = &runners_;
 
   FlutterEngineAOTData aot_data = nullptr;
   if (file_exists(aot)) {
@@ -360,15 +325,12 @@ bool FlutterHost::init(Server* server, const char* bundle_dir,
   }
   if (!aot_data) {
     // JIT mode needs VM snapshot blobs next to the engine library
-    size_t vm_size = 0, iso_size = 0;
-    const uint8_t* vm =
-        map_file(enginedir_ + "/vm_isolate_snapshot.bin", &vm_size);
-    const uint8_t* iso =
-        map_file(enginedir_ + "/isolate_snapshot.bin", &iso_size);
-    args.vm_snapshot_data = vm;
-    args.vm_snapshot_data_size = vm_size;
-    args.isolate_snapshot_data = iso;
-    args.isolate_snapshot_data_size = iso_size;
+    jit_vm_ = read_file(enginedir_ + "/vm_isolate_snapshot.bin");
+    jit_iso_ = read_file(enginedir_ + "/isolate_snapshot.bin");
+    args.vm_snapshot_data = jit_vm_.data();
+    args.vm_snapshot_data_size = jit_vm_.size();
+    args.isolate_snapshot_data = jit_iso_.data();
+    args.isolate_snapshot_data_size = jit_iso_.size();
     LOGI("no AOT bundle; attempting JIT with engine snapshots");
   }
 

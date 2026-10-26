@@ -15,9 +15,11 @@ extern "C" {
 #include <unistd.h>
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include "backend.h"
 #include "log.h"
 #include "util.h"
+#include "wl.h"
 
 namespace oasis {
 
@@ -53,7 +55,8 @@ class DrmBackend : public Backend {
   void dispatch_seat();
   void dispatch_drm();
   void dispatch_input();
-  void add_input_device(libinput_device* dev);
+  void init_outputs();
+  bool init_egl();
   void page_flip_done(DrmOutput* out);
 
   Callbacks cb_;
@@ -65,14 +68,14 @@ class DrmBackend : public Backend {
   EGLDisplay edpy_ = EGL_NO_DISPLAY;
   EGLConfig econf_ = nullptr;
   EGLContext ctx_ = EGL_NO_CONTEXT;
-  wl_event_source* seat_src_ = nullptr;
-  wl_event_source* drm_src_ = nullptr;
-  wl_event_source* input_src_ = nullptr;
+  std::unique_ptr<EventSource> seat_src_;
+  std::unique_ptr<EventSource> drm_src_;
+  std::unique_ptr<EventSource> input_src_;
   bool active_ = false;
   bool initial_modeset_done_ = false;
   double px_ = 0, py_ = 0;
   std::vector<Output*> outs_;
-  std::vector<DrmOutput*> drouts_;
+  std::vector<std::unique_ptr<DrmOutput>> drouts_;
   xkb_context* xkb_ = nullptr;
   xkb_state* kbd_state_ = nullptr;
   xkb_keymap* kbd_keymap_ = nullptr;
@@ -108,15 +111,15 @@ static const libinput_interface li_interface = {li_open_restricted,
 
 // ------------------------------------------------------------- EGL on GBM
 
-static bool egl_init_gbm(DrmBackend* b) {
+bool DrmBackend::init_egl() {
   PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform =
       (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress(
           "eglGetPlatformDisplayEXT");
   if (get_platform)
-    b->edpy_ = get_platform(EGL_PLATFORM_GBM_KHR, b->gbm_, nullptr);
-  if (b->edpy_ == EGL_NO_DISPLAY)
-    b->edpy_ = eglGetDisplay((EGLNativeDisplayType)b->gbm_);
-  if (!eglInitialize(b->edpy_, nullptr, nullptr)) {
+    edpy_ = get_platform(EGL_PLATFORM_GBM_KHR, gbm_, nullptr);
+  if (edpy_ == EGL_NO_DISPLAY)
+    edpy_ = eglGetDisplay((EGLNativeDisplayType)gbm_);
+  if (!eglInitialize(edpy_, nullptr, nullptr)) {
     LOGE("eglInitialize (gbm) failed");
     return false;
   }
@@ -126,14 +129,14 @@ static bool egl_init_gbm(DrmBackend* b) {
                     EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
                     EGL_ALPHA_SIZE, 0, EGL_NONE};
   EGLint n = 0;
-  eglChooseConfig(b->edpy_, attrs, &b->econf_, 1, &n);
+  eglChooseConfig(edpy_, attrs, &econf_, 1, &n);
   if (n < 1) {
     LOGE("no EGL config for gbm");
     return false;
   }
   EGLint cattr[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-  b->ctx_ = eglCreateContext(b->edpy_, b->econf_, EGL_NO_CONTEXT, cattr);
-  return b->ctx_ != EGL_NO_CONTEXT;
+  ctx_ = eglCreateContext(edpy_, econf_, EGL_NO_CONTEXT, cattr);
+  return ctx_ != EGL_NO_CONTEXT;
 }
 
 EGLContext DrmBackend::new_context() {
@@ -143,18 +146,16 @@ EGLContext DrmBackend::new_context() {
 
 // ------------------------------------------------------------ connectors
 
-static void init_outputs(DrmBackend* b) {
-  drmModeRes* res = drmModeGetResources(b->drm_fd_);
+void DrmBackend::init_outputs() {
+  drmModeRes* res = drmModeGetResources(drm_fd_);
   if (!res) {
     LOGE("drmModeGetResources failed");
     return;
   }
   std::vector<bool> crtc_used(res->count_crtcs, false);
-  int out_idx = 0;
   int32_t lay_x = 0;
   for (int i = 0; i < res->count_connectors; i++) {
-    drmModeConnector* conn =
-        drmModeGetConnector(b->drm_fd_, res->connectors[i]);
+    drmModeConnector* conn = drmModeGetConnector(drm_fd_, res->connectors[i]);
     if (!conn || conn->connection != DRM_MODE_CONNECTED ||
         conn->count_modes == 0) {
       if (conn) drmModeFreeConnector(conn);
@@ -168,8 +169,7 @@ static void init_outputs(DrmBackend* b) {
     // find a crtc: prefer the connector's encoder, else first free
     uint32_t crtc_id = 0;
     if (conn->encoder_id) {
-      drmModeEncoder* enc =
-          drmModeGetEncoder(b->drm_fd_, conn->encoder_id);
+      drmModeEncoder* enc = drmModeGetEncoder(drm_fd_, conn->encoder_id);
       if (enc) {
         if (enc->crtc_id) crtc_id = enc->crtc_id;
         drmModeFreeEncoder(enc);
@@ -182,11 +182,11 @@ static void init_outputs(DrmBackend* b) {
     for (int c = 0; c < res->count_crtcs; c++)
       if (res->crtcs[c] == crtc_id) crtc_used[c] = true;
 
-    auto* out = new DrmOutput();
-    out->backend = b;
+    auto out = std::make_unique<DrmOutput>();
+    out->backend = this;
     out->conn_id = conn->connector_id;
     out->crtc_id = crtc_id;
-    out->saved_crtc = drmModeGetCrtc(b->drm_fd_, crtc_id);
+    out->saved_crtc = drmModeGetCrtc(drm_fd_, crtc_id);
     out->width = mode->hdisplay;
     out->height = mode->vdisplay;
     out->phys_w = conn->mmWidth;
@@ -202,25 +202,23 @@ static void init_outputs(DrmBackend* b) {
     out->make = "DRM";
     out->model = nm;
 
-    out->gbm_surf = gbm_surface_create(b->gbm_, mode->hdisplay,
-                                     mode->vdisplay, GBM_FORMAT_XRGB8888,
+    out->gbm_surf = gbm_surface_create(gbm_, mode->hdisplay, mode->vdisplay,
+                                     GBM_FORMAT_XRGB8888,
                                      GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-    out->esurf = eglCreateWindowSurface(b->edpy_, b->econf_,
+    out->esurf = eglCreateWindowSurface(edpy_, econf_,
                                         (EGLNativeWindowType)out->gbm_surf,
                                         nullptr);
     if (out->esurf == EGL_NO_SURFACE) {
       LOGE("eglCreateWindowSurface failed for %s", nm);
       drmModeFreeConnector(conn);
-      delete out;
       continue;
     }
-    b->outs_.push_back(out);
-    b->drouts_.push_back(out);
-    out_idx++;
+    outs_.push_back(out.get());
+    drouts_.push_back(std::move(out));
     drmModeFreeConnector(conn);
   }
   drmModeFreeResources(res);
-  LOGI("drm: %d output(s)", (int)b->drouts_.size());
+  LOGI("drm: %d output(s)", (int)drouts_.size());
 }
 
 // ------------------------------------------------------------ flip events
@@ -230,9 +228,7 @@ static void drm_fb_event(int fd, unsigned int frame, unsigned int sec,
                          void* data) {
   auto* out = static_cast<DrmOutput*>(data);
   out->flip_pending = false;
-  if (out->bo) {
-    gbm_surface_release_buffer(out->gbm_surf, out->bo);
-  }
+  if (out->bo) gbm_surface_release_buffer(out->gbm_surf, out->bo);
   out->bo = out->next_bo;
   out->next_bo = nullptr;
   out->backend->cb_.frame(out);
@@ -261,8 +257,8 @@ void DrmBackend::end_frame(Output* o) {
   uint32_t handle = gbm_bo_get_handle(bo).u32;
   uint32_t stride = gbm_bo_get_stride(bo);
   uint32_t fb = 0;
-  if (drmModeAddFB(drm_fd_, out->width, out->height, 24, 32, stride,
-                   handle, &fb) < 0) {
+  if (drmModeAddFB(drm_fd_, out->width, out->height, 24, 32, stride, handle,
+                   &fb) < 0) {
     LOGE("drmModeAddFB failed");
     gbm_surface_release_buffer(out->gbm_surf, bo);
     return;
@@ -276,8 +272,8 @@ void DrmBackend::end_frame(Output* o) {
     initial_modeset_done_ = true;
   }
   out->next_bo = bo;
-  if (drmModePageFlip(drm_fd_, out->crtc_id, fb,
-                      DRM_MODE_PAGE_FLIP_EVENT, out) < 0) {
+  if (drmModePageFlip(drm_fd_, out->crtc_id, fb, DRM_MODE_PAGE_FLIP_EVENT,
+                      out) < 0) {
     LOGE("page flip failed");
     gbm_surface_release_buffer(out->gbm_surf, bo);
     out->next_bo = nullptr;
@@ -355,12 +351,12 @@ void DrmBackend::dispatch_input() {
           xkb_state_update_key(kbd_state_, key + 8,
                                press ? XKB_KEY_DOWN : XKB_KEY_UP);
           if (cb_.modifiers)
-            cb_.modifiers(xkb_state_serialize_mods(
-                              kbd_state_, XKB_STATE_MODS_DEPRESSED),
+            cb_.modifiers(xkb_state_serialize_mods(kbd_state_,
+                                                 XKB_STATE_MODS_DEPRESSED),
                           xkb_state_serialize_mods(kbd_state_,
-                                                   XKB_STATE_MODS_LATCHED),
+                                                 XKB_STATE_MODS_LATCHED),
                           xkb_state_serialize_mods(kbd_state_,
-                                                   XKB_STATE_MODS_LOCKED),
+                                                 XKB_STATE_MODS_LOCKED),
                           xkb_state_serialize_layout(
                               kbd_state_, XKB_STATE_LAYOUT_EFFECTIVE));
         }
@@ -400,8 +396,8 @@ void DrmBackend::seat_enabled() {
       exit(1);
     }
     gbm_ = gbm_create_device(drm_fd_);
-    if (!egl_init_gbm(this)) exit(1);
-    init_outputs(this);
+    if (!init_egl()) exit(1);
+    init_outputs();
   } else {
     drmSetMaster(drm_fd_);
   }
@@ -411,13 +407,12 @@ void DrmBackend::seat_enabled() {
     if (li_ && libinput_udev_assign_seat(li_, seat_name ? seat_name
                                                       : "seat0") == 0) {
       int li_fd = libinput_get_fd(li_);
-      input_src_ = wl_event_loop_add_fd(
+      input_src_ = EventSource::watch(
           loop_, li_fd, WL_EVENT_READABLE,
-          [](int, uint32_t, void* data) -> int {
-            static_cast<DrmBackend*>(data)->dispatch_input();
+          [this](int, uint32_t) {
+            dispatch_input();
             return 0;
-          },
-          this);
+          });
     }
     if (!xkb_) xkb_ = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     kbd_keymap_ =
@@ -432,9 +427,7 @@ void DrmBackend::seat_disabled() {
 }
 
 void DrmBackend::dispatch_seat() {
-  if (libseat_dispatch(seat_, 0) < 0) {
-    LOGE("libseat dispatch failed");
-  }
+  if (libseat_dispatch(seat_, 0) < 0) LOGE("libseat dispatch failed");
 }
 
 bool DrmBackend::init(wl_event_loop* loop, Callbacks cb) {
@@ -446,13 +439,11 @@ bool DrmBackend::init(wl_event_loop* loop, Callbacks cb) {
     return false;
   }
   int sfd = libseat_get_fd(seat_);
-  seat_src_ = wl_event_loop_add_fd(
-      loop_, sfd, WL_EVENT_READABLE,
-      [](int, uint32_t, void* data) -> int {
-        static_cast<DrmBackend*>(data)->dispatch_seat();
-        return 0;
-      },
-      this);
+  seat_src_ = EventSource::watch(loop_, sfd, WL_EVENT_READABLE,
+                                 [this](int, uint32_t) {
+                                   dispatch_seat();
+                                   return 0;
+                                 });
   while (!active_) {
     if (libseat_dispatch(seat_, -1) < 0) {
       LOGE("seat dispatch failed during init");
@@ -460,13 +451,11 @@ bool DrmBackend::init(wl_event_loop* loop, Callbacks cb) {
     }
   }
   // drm fd events
-  drm_src_ = wl_event_loop_add_fd(
-      loop_, drm_fd_, WL_EVENT_READABLE,
-      [](int, uint32_t, void* data) -> int {
-        static_cast<DrmBackend*>(data)->dispatch_drm();
-        return 0;
-      },
-      this);
+  drm_src_ = EventSource::watch(loop_, drm_fd_, WL_EVENT_READABLE,
+                                [this](int, uint32_t) {
+                                  dispatch_drm();
+                                  return 0;
+                                });
   if (outs_.empty()) {
     LOGE("no connected outputs");
     return false;
@@ -477,18 +466,18 @@ bool DrmBackend::init(wl_event_loop* loop, Callbacks cb) {
 }
 
 DrmBackend::~DrmBackend() {
-  for (DrmOutput* o : drouts_) {
+  for (auto& o : drouts_) {
     if (o->saved_crtc && drm_fd_ >= 0)
       drmModeSetCrtc(drm_fd_, o->saved_crtc->crtc_id,
                      o->saved_crtc->buffer_id, o->saved_crtc->x,
-                     o->saved_crtc->y, &o->conn_id, 1,
-                     &o->saved_crtc->mode);
+                     o->saved_crtc->y, &o->conn_id, 1, &o->saved_crtc->mode);
     if (o->saved_crtc) drmModeFreeCrtc(o->saved_crtc);
-    delete o;
   }
   if (seat_) libseat_close_seat(seat_);
 }
 
-Backend* create_drm_backend() { return new DrmBackend(); }
+std::unique_ptr<Backend> create_drm_backend() {
+  return std::make_unique<DrmBackend>();
+}
 
 }  // namespace oasis
